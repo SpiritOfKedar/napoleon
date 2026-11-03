@@ -1,0 +1,10 @@
+[
+  {"startSec": 0, "text": "Good morning everyone, and welcome to the quarterly planning meeting. Today we will cover the product roadmap, hiring, and the budget."},
+  {"startSec": 9.59, "text": "First, the product roadmap. The mobile app redesign is on track, and we expect to ship the new onboarding flow in early spring."},
+  {"startSec": 20.47, "text": "Next, hiring. We plan to add two backend engineers and one designer before the end of the year. Interviews start next week."},
+  {"startSec": 31.66, "text": "Now let us talk about the Q3 budget. Marketing spending came in fifteen percent under plan, so we will move that money into the customer research program."},
+  {"startSec": 43.85, "text": "On infrastructure, the database migration finished last Tuesday. Search latency dropped from eight hundred milliseconds to about one hundred and twenty."},
+  {"startSec": 55.58, "text": "A quick note about the office. The kitchen on the third floor will be closed for renovation during the first two weeks of December."},
+  {"startSec": 65.09, "text": "Finally, the company offsite will be held in Lisbon in March. Please submit your travel requests by the end of January."},
+  {"startSec": 75.25, "text": "That is everything for today. Thank you all, and see you at the next meeting."}
+]

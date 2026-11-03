@@ -1,0 +1,15 @@
+{
+  "name": "napoleon",
+  "private": true,
+  "description": "npm equivalents of the Makefile targets, for machines without make (e.g. Windows).",
+  "scripts": {
+    "up": "docker compose up -d --build --wait frontend && docker compose up --no-log-prefix seed",
+    "down": "docker compose down",
+    "logs": "docker compose logs -f --tail=100",
+    "test": "npm run test:backend && npm run test:frontend",
+    "test:backend": "cd backend && mvnw -B test",
+    "test:frontend": "cd frontend && npm ci && npx ng test --watch=false",
+    "seed": "sh infra/scripts/seed.sh",
+    "e2e": "sh infra/scripts/e2e-check.sh"
+  }
+}

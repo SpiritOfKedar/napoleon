@@ -34,6 +34,7 @@ public class SearchService {
     private final int defaultLimit;
     private final int candidates;
     private final boolean rerank;
+    private final double minScore;
 
     public SearchService(TranscriptionClient client, SearchRepository repo, NapoleonProperties props) {
         this.client = client;
@@ -41,6 +42,7 @@ public class SearchService {
         this.defaultLimit = props.search().defaultLimit();
         this.candidates = props.search().candidates();
         this.rerank = props.search().rerank();
+        this.minScore = props.search().minScore();
     }
 
     record Scored(Candidate candidate, double score) {}
@@ -92,6 +94,9 @@ public class SearchService {
         }
         if (scores.isPresent()) {
             out.sort(Comparator.comparingDouble(Scored::score).reversed());
+            // The cross-encoder separates cleanly: relevant passages score ~0.01-1, unrelated ones
+            // ~0.000-0.006. Showing those as "results" is noise, so "no results" is the honest answer.
+            out.removeIf(s -> s.score() < minScore);
         }
         return out;
     }

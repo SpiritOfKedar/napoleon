@@ -9,6 +9,7 @@ import { MediaStore } from '../../core/media-store';
 import { SearchResult } from '../../core/models';
 import { formatClock, formatDuration } from '../../core/time';
 import { Icon } from '../../shared/icon';
+import { MenuOption, MenuSelect, MenuValue } from '../../shared/menu-select';
 
 interface ResultView extends SearchResult {
   parts: TextPart[];
@@ -20,7 +21,7 @@ interface ResultView extends SearchResult {
 
 @Component({
   selector: 'app-search-page',
-  imports: [FormsModule, RouterLink, Icon],
+  imports: [FormsModule, RouterLink, Icon, MenuSelect],
   template: `
     <form class="toolbar" (ngSubmit)="submit()" role="search">
       <label class="search-field grow">
@@ -28,16 +29,7 @@ interface ResultView extends SearchResult {
         <span class="sr-only">Search recordings</span>
         <input #box name="q" [(ngModel)]="query" placeholder="Search what was said" autocomplete="off" enterkeyhint="search" />
       </label>
-      <label class="scope">
-        <span class="sr-only">Search in</span>
-        <select name="mediaId" [(ngModel)]="mediaId" (ngModelChange)="submit()">
-          <option [ngValue]="null">All Recordings</option>
-          @for (m of store.indexed(); track m.id) {
-            <option [ngValue]="m.id">{{ m.filename }}</option>
-          }
-        </select>
-        <app-icon name="down" [size]="14" />
-      </label>
+      <app-menu-select ariaLabel="Search in" [options]="scopeOptions()" [value]="mediaId" (valueChange)="setScope($event)" />
     </form>
 
     <div class="page">
@@ -95,14 +87,6 @@ interface ResultView extends SearchResult {
   `,
   styles: `
     .grow { flex: 1; }
-    .scope { position: relative; display: flex; align-items: center; color: var(--label-2); }
-    .scope select {
-      appearance: none; height: 2.25rem; max-width: 13rem; padding: 0 1.75rem 0 0.75rem; border: 0; border-radius: 10px;
-      background: var(--fill); color: var(--label); font: 400 0.875rem var(--font); text-overflow: ellipsis; cursor: pointer;
-    }
-    .scope select:hover { background: var(--fill-2); }
-    .scope app-icon { position: absolute; right: 0.625rem; pointer-events: none; }
-
     kbd { font: 500 0.75rem var(--font); padding: 0.0625rem 0.375rem; border-radius: 4px; background: var(--fill); color: var(--label); }
     .idle, .count { margin: 1rem 0 0.75rem; }
 
@@ -128,7 +112,6 @@ interface ResultView extends SearchResult {
     .chev { color: var(--label-3); margin-top: 0.25rem; }
 
     @media (max-width: 760px) {
-      .scope select { max-width: 8rem; }
       .row { grid-template-columns: 3.5rem minmax(0, 1fr); }
       .chev { display: none; }
     }
@@ -151,6 +134,11 @@ export class SearchPage {
   readonly lastQuery = signal('');
   readonly clock = formatClock;
   readonly formatDuration = formatDuration;
+  /** "All Recordings" first, then each searchable recording with its length. */
+  readonly scopeOptions = computed<MenuOption[]>(() => [
+    { value: null, label: 'All Recordings' },
+    ...this.store.indexed().map((m) => ({ value: m.id, label: m.filename, detail: formatDuration(m.durationSec) })),
+  ]);
   readonly fileCount = computed(() => new Set(this.results().map((r) => r.mediaId)).size);
 
   constructor() {
@@ -207,6 +195,11 @@ export class SearchPage {
       return;
     }
     this.router.navigate([], { relativeTo: this.route, queryParams: { q, mediaId: this.mediaId ?? null } });
+  }
+
+  setScope(value: MenuValue): void {
+    this.mediaId = typeof value === 'number' ? value : null;
+    this.submit();
   }
 
   private toViews(hits: SearchResult[], q: string): ResultView[] {

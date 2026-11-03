@@ -32,3 +32,15 @@ describe('splitHighlight', () => {
     ]);
   });
 });
+
+describe('splitHighlight short terms', () => {
+  it('does not light up stop words or fragments inside other words', () => {
+    const parts = splitHighlight('The offsite will be held in Lisbon', 'was he in lisbon');
+    expect(parts.filter((p) => p.match).map((p) => p.text)).toEqual(['Lisbon']);
+  });
+
+  it('matches short terms as whole words only, longer ones as prefixes', () => {
+    const parts = splitHighlight('AI and AGI budgets', 'ai budget');
+    expect(parts.filter((p) => p.match).map((p) => p.text)).toEqual(['AI', 'budget']);
+  });
+});

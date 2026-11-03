@@ -3,6 +3,7 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Observable } from 'rxjs';
 import { ApiService, errorMessage } from '../../core/api.service';
+import { ConfirmService } from '../../core/confirm.service';
 import { MediaStore } from '../../core/media-store';
 import { MediaFile, isProcessing } from '../../core/models';
 import { formatDuration } from '../../core/time';
@@ -126,6 +127,7 @@ type Filter = 'all' | 'ready' | 'processing' | 'failed';
 })
 export class LibraryPage {
   private readonly api = inject(ApiService);
+  private readonly confirm = inject(ConfirmService);
   readonly store = inject(MediaStore);
 
   readonly error = signal<string | null>(null);
@@ -155,15 +157,26 @@ export class LibraryPage {
     return m.contentType?.startsWith('video/') ?? false;
   }
 
-  remove(m: MediaFile): void {
-    if (!window.confirm(`Delete “${m.filename}”?\n\nThe recording and its transcript will be removed. This can’t be undone.`)) {
+  async remove(m: MediaFile): Promise<void> {
+    const ok = await this.confirm.confirm({
+      title: `Delete “${m.filename}”?`,
+      message: 'The recording and its transcript will be removed. This can’t be undone.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) {
       return;
     }
     this.run(m, this.api.deleteMedia(m.id), () => this.store.remove(m.id));
   }
 
-  reprocess(m: MediaFile): void {
-    if (!window.confirm(`Transcribe “${m.filename}” again?\n\nThe current transcript is replaced using the current model.`)) {
+  async reprocess(m: MediaFile): Promise<void> {
+    const ok = await this.confirm.confirm({
+      title: `Transcribe “${m.filename}” again?`,
+      message: 'The current transcript is replaced using the current model. Long recordings take a few minutes.',
+      confirmLabel: 'Transcribe',
+    });
+    if (!ok) {
       return;
     }
     this.run(m, this.api.reprocessMedia(m.id), () => this.store.refresh());

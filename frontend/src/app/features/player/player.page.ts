@@ -1,4 +1,4 @@
-import { Component, DestroyRef, ElementRef, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
+import { Component, DestroyRef, ElementRef, HostListener, afterRenderEffect, computed, inject, signal, untracked, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
@@ -10,6 +10,7 @@ import { SpringScroller } from '../../core/spring';
 import { formatClock, parseSeconds } from '../../core/time';
 import { HitTimeline, TimelineHit } from '../../shared/hit-timeline';
 import { Icon } from '../../shared/icon';
+import { MenuOption, MenuSelect, MenuValue } from '../../shared/menu-select';
 import { StatusBadge } from '../../shared/status-badge';
 
 interface LineView extends TranscriptSegment {
@@ -20,9 +21,12 @@ interface LineView extends TranscriptSegment {
 /** Keys that scroll a focused container; pressing one means the user is navigating by hand. */
 const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
+/** Seconds skipped by ←/→ while the player has the page. */
+const SKIP_SEC = 5;
+
 @Component({
   selector: 'app-player-page',
-  imports: [FormsModule, RouterLink, StatusBadge, HitTimeline, Icon],
+  imports: [FormsModule, RouterLink, StatusBadge, HitTimeline, Icon, MenuSelect],
   template: `
     <header class="toolbar">
       <a class="btn plain back" routerLink="/search" [queryParams]="q() ? { q: q() } : {}">
@@ -43,26 +47,64 @@ const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home
     @if (media(); as m) {
       <div class="layout">
         <section class="stage" aria-label="Player">
-          @if (!isVideo()) {
-            <div class="artwork" aria-hidden="true"><app-icon name="waveform" [size]="56" /></div>
-          }
-          <video
-            #player
-            [class.audio]="!isVideo()"
-            [src]="streamUrl()"
-            controls
-            preload="metadata"
-            (loadedmetadata)="onLoaded(player.duration)"
-            (timeupdate)="currentTime.set(player.currentTime)"
-            (seeked)="currentTime.set(player.currentTime)"
-          ></video>
+          <div #box class="box" [class.fullscreen]="fullscreen()">
+            <div class="screen" [class.audio]="!isVideo()">
+              @if (!isVideo()) {
+                <div class="artwork" aria-hidden="true"><app-icon name="waveform" [size]="56" /></div>
+              }
+              <!-- Our own controls below; the browser's are not used. One element plays audio too. -->
+              <video
+                #player
+                [src]="streamUrl()"
+                preload="metadata"
+                playsinline
+                (click)="togglePlay()"
+                (loadedmetadata)="onLoaded(player.duration)"
+                (timeupdate)="currentTime.set(player.currentTime)"
+                (seeked)="currentTime.set(player.currentTime)"
+                (play)="playing.set(true)"
+                (pause)="playing.set(false)"
+                (ended)="playing.set(false)"
+                (waiting)="buffering.set(true)"
+                (playing)="buffering.set(false); playing.set(true)"
+                (canplay)="buffering.set(false)"
+                (volumechange)="muted.set(player.muted)"
+                (ratechange)="rate.set(player.playbackRate)"
+              ></video>
+              @if (buffering() && playing()) {
+                <span class="spinner" role="status" aria-label="Loading"></span>
+              }
+            </div>
+
+            <div class="transport">
+              <button class="btn icon play" type="button" (click)="togglePlay()" [attr.aria-label]="playing() ? 'Pause' : 'Play'" [title]="playing() ? 'Pause (Space)' : 'Play (Space)'">
+                <app-icon [name]="playing() ? 'pause' : 'play'" [size]="20" />
+              </button>
+              <app-hit-timeline
+                class="scrubber"
+                [duration]="duration()"
+                [hits]="timeline()"
+                [playhead]="currentTime()"
+                [tall]="true"
+                [showLabels]="true"
+                [scrubbable]="true"
+                (scrub)="seek($event, false)"
+                (seek)="seek($event, true)"
+              />
+              <app-menu-select class="speed" ariaLabel="Playback speed" placement="above" [options]="speeds" [value]="rate()" (valueChange)="setRate($event)" />
+              <button class="btn icon" type="button" (click)="toggleMute()" [attr.aria-label]="muted() ? 'Unmute' : 'Mute'" [title]="muted() ? 'Unmute' : 'Mute'">
+                <app-icon [name]="muted() ? 'mute' : 'volume'" [size]="18" />
+              </button>
+              @if (isVideo()) {
+                <button class="btn icon" type="button" (click)="toggleFullscreen()" [attr.aria-label]="fullscreen() ? 'Exit full screen' : 'Full screen'" [title]="fullscreen() ? 'Exit Full Screen' : 'Full Screen'">
+                  <app-icon [name]="fullscreen() ? 'exitfullscreen' : 'fullscreen'" [size]="18" />
+                </button>
+              }
+            </div>
+          </div>
           @if (needsClick()) {
             <p class="footnote">Press play to start at {{ clock(currentTime()) }}.</p>
           }
-
-          <div class="scrub">
-            <app-hit-timeline [duration]="duration()" [hits]="timeline()" [playhead]="currentTime()" [tall]="true" [showLabels]="true" (seek)="seek($event, true)" />
-          </div>
 
           <div class="matches">
             @if (hits().length) {
@@ -124,14 +166,29 @@ const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home
       padding: 1rem 2rem 2rem; align-items: start;
     }
     .stage { position: sticky; top: 4.5rem; display: grid; gap: 0.75rem; }
-    video { display: block; width: 100%; max-height: 64vh; border-radius: var(--radius); background: #000; }
-    video.audio { height: 3.5rem; background: transparent; border-radius: 0; }
-    .artwork {
-      aspect-ratio: 16 / 9; border-radius: var(--radius); display: grid; place-items: center;
-      background: var(--fill); color: var(--label-3);
+    .box { display: grid; gap: 0.625rem; }
+    .screen { position: relative; border-radius: var(--radius); overflow: hidden; background: #000; }
+    video { display: block; width: 100%; max-height: 64vh; background: #000; cursor: pointer; }
+    .screen.audio { background: var(--fill); }
+    .screen.audio video { display: none; }
+    .artwork { aspect-ratio: 16 / 9; display: grid; place-items: center; color: var(--label-3); }
+    .spinner {
+      position: absolute; left: 50%; top: 50%; width: 2rem; height: 2rem; margin: -1rem 0 0 -1rem; border-radius: 50%;
+      border: 2.5px solid rgba(255, 255, 255, 0.25); border-top-color: #fff; animation: spin 0.9s linear infinite;
     }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .transport { display: flex; align-items: center; gap: 0.375rem; }
+    .transport .play { width: 2.5rem; height: 2.5rem; color: var(--label); }
+    .scrubber { flex: 1; min-width: 0; margin: 1.125rem 0.5rem 0; }
+    .speed { flex: none; }
+    .speed ::ng-deep .trigger { height: 2rem; background: transparent; padding: 0 0.375rem 0 0.5rem; font-size: 0.8125rem; font-variant-numeric: tabular-nums; }
+    .speed ::ng-deep .trigger:hover { background: var(--fill); }
+    /* Full screen: the video fills the display and our controls float at the bottom. */
+    .box.fullscreen { background: #000; padding: 1rem 1.5rem 1.25rem; align-content: center; height: 100vh; color-scheme: dark; color: #f5f5f7; }
+    .box.fullscreen .screen { border-radius: 0; }
+    .box.fullscreen video { max-height: calc(100vh - 6rem); }
+    .box.fullscreen .transport { --label: #f5f5f7; --label-2: rgba(235,235,245,.6); --fill: rgba(118,118,128,.24); --fill-2: rgba(118,118,128,.36); }
     .stage > .footnote { margin: 0; }
-    .scrub { padding: 0.25rem 0.125rem 0; }
     .matches { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; min-height: 2rem; }
     .nav { display: flex; gap: 0.125rem; }
 
@@ -139,6 +196,8 @@ const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home
     .find { flex: none; }
     .lines {
       list-style: none; margin: 0; padding: 30vh 0 45vh; height: calc(100vh - 9.5rem); overflow-y: auto; outline: none;
+      /* The app positions this list itself; browser scroll anchoring would fight it when lines re-render. */
+      overflow-anchor: none;
       /* Lines fade out at the edges rather than ending at a hard line. */
       -webkit-mask-image: linear-gradient(transparent, #000 12%, #000 80%, transparent);
       mask-image: linear-gradient(transparent, #000 12%, #000 80%, transparent);
@@ -193,6 +252,7 @@ export class PlayerPage {
   private readonly router = inject(Router);
   private readonly player = viewChild<ElementRef<HTMLVideoElement>>('player');
   private readonly panel = viewChild<ElementRef<HTMLOListElement>>('panel');
+  private readonly box = viewChild<ElementRef<HTMLElement>>('box');
   private scroller: SpringScroller | null = null;
 
   readonly media = signal<MediaFile | null>(null);
@@ -203,6 +263,12 @@ export class PlayerPage {
   readonly currentTime = signal(0);
   readonly mediaDuration = signal<number | null>(null);
   readonly needsClick = signal(false);
+  readonly playing = signal(false);
+  readonly buffering = signal(false);
+  readonly muted = signal(false);
+  readonly rate = signal(1);
+  readonly fullscreen = signal(false);
+  readonly speeds: MenuOption[] = [0.75, 1, 1.25, 1.5, 2].map((r) => ({ value: r, label: `${r}×` }));
   /** The transcript follows playback until the user scrolls it themselves. */
   readonly following = signal(true);
   readonly clock = formatClock;
@@ -298,10 +364,12 @@ export class PlayerPage {
         }
       });
 
-    // Keep the current line in view with a spring, while following.
-    effect(() => {
+    // Keep the current line in view with a spring, while following. After render, so newly
+    // loaded lines exist in the DOM (a deep link to ?t= must land on its line even when paused).
+    afterRenderEffect(() => {
       const i = this.activeIndex();
       const panel = this.panel()?.nativeElement;
+      this.lines(); // re-position when lines re-render (e.g. search highlights arrive) and heights shift
       if (i < 0 || !panel || !this.following()) {
         return;
       }
@@ -333,6 +401,69 @@ export class PlayerPage {
         () => this.needsClick.set(false),
         () => this.needsClick.set(true), // autoplay policy; the user has to press play
       );
+    }
+  }
+
+  togglePlay(): void {
+    const el = this.player()?.nativeElement;
+    if (!el) {
+      return;
+    }
+    if (el.paused) {
+      el.play().then(
+        () => this.needsClick.set(false),
+        () => this.needsClick.set(true),
+      );
+    } else {
+      el.pause();
+    }
+  }
+
+  toggleMute(): void {
+    const el = this.player()?.nativeElement;
+    if (el) {
+      el.muted = !el.muted;
+    }
+  }
+
+  setRate(value: MenuValue): void {
+    const el = this.player()?.nativeElement;
+    if (el && typeof value === 'number') {
+      el.playbackRate = value;
+    }
+  }
+
+  toggleFullscreen(): void {
+    const box = this.box()?.nativeElement;
+    if (!box) {
+      return;
+    }
+    if (document.fullscreenElement) {
+      void document.exitFullscreen?.();
+    } else {
+      void box.requestFullscreen?.();
+    }
+  }
+
+  @HostListener('document:fullscreenchange')
+  onFullscreenChange(): void {
+    this.fullscreen.set(document.fullscreenElement === this.box()?.nativeElement);
+  }
+
+  /** Space plays/pauses and ←/→ skip, unless focus is somewhere that uses those keys itself. */
+  @HostListener('document:keydown', ['$event'])
+  onKey(e: KeyboardEvent): void {
+    const t = e.target as HTMLElement | null;
+    if (e.metaKey || e.ctrlKey || e.altKey || t?.closest('input, textarea, select, button, a, [role=slider], [role=listbox], dialog')) {
+      return;
+    }
+    if (e.key === ' ' || e.key === 'k') {
+      e.preventDefault();
+      this.togglePlay();
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      const d = e.key === 'ArrowLeft' ? -SKIP_SEC : SKIP_SEC;
+      this.seek(Math.min(this.duration(), Math.max(0, this.currentTime() + d)), false);
     }
   }
 
@@ -380,7 +511,9 @@ export class PlayerPage {
       return;
     }
     this.scroller ??= new SpringScroller(panel, 0.45);
+    // The line's position inside the scrolled list, independent of offsetParent quirks.
+    const top = li.getBoundingClientRect().top - panel.getBoundingClientRect().top + panel.scrollTop;
     // Rest the current line about a third of the way down, where the eye already is.
-    this.scroller.to(li.offsetTop - panel.clientHeight * 0.32);
+    this.scroller.to(top - panel.clientHeight * 0.32);
   }
 }

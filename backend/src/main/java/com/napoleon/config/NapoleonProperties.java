@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import java.time.Duration;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -39,6 +40,7 @@ public record NapoleonProperties(
     /**
      * @param candidates fused candidates considered (and reranked) per query
      * @param rerank     re-score candidates with the cross-encoder in the transcription service
+     * @param minScore   reranked results below this relevance are dropped (0 keeps everything)
      */
-    public record Search(@Positive int defaultLimit, @Positive int candidates, boolean rerank) {}
+    public record Search(@Positive int defaultLimit, @Positive int candidates, boolean rerank, @PositiveOrZero double minScore) {}
 }

@@ -2,11 +2,12 @@ import { Component, inject } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { MediaStore } from './core/media-store';
 import { formatDuration } from './core/time';
+import { ConfirmDialog } from './shared/confirm-dialog';
 import { Icon } from './shared/icon';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, Icon],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, Icon, ConfirmDialog],
   template: `
     <div class="shell">
       <aside class="sidebar">
@@ -38,6 +39,7 @@ import { Icon } from './shared/icon';
         <router-outlet />
       </main>
     </div>
+    <app-confirm-dialog />
   `,
   styles: `
     .shell { display: grid; grid-template-columns: 15rem minmax(0, 1fr); min-height: 100vh; }

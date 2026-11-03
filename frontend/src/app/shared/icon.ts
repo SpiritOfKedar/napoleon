@@ -19,10 +19,17 @@ const PATHS: Record<string, string> = {
   prev: 'M6.5 5.5v13M18 6.2v11.6a.6.6 0 0 1-.95.5L9.5 12.5a.6.6 0 0 1 0-1l7.55-5.8a.6.6 0 0 1 .95.5Z',
   next: 'M17.5 5.5v13M6 6.2v11.6a.6.6 0 0 0 .95.5l7.55-5.8a.6.6 0 0 0 0-1L6.95 5.7A.6.6 0 0 0 6 6.2Z',
   plus: 'M12 5v14M5 12h14',
+  check: 'M5.5 12.5 10 17l8.5-9.5',
+  updown: 'M8.5 9.5 12 6l3.5 3.5M8.5 14.5 12 18l3.5-3.5',
+  pause: 'M7.5 5.5h3v13h-3zM13.5 5.5h3v13h-3z',
+  volume: 'M4.5 9.5h3l4.5-4v13l-4.5-4h-3zM15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11',
+  mute: 'M4.5 9.5h3l4.5-4v13l-4.5-4h-3zM16 9.5l5 5M21 9.5l-5 5',
+  fullscreen: 'M4.5 9V4.5H9M15 4.5h4.5V9M19.5 15v4.5H15M9 19.5H4.5V15',
+  exitfullscreen: 'M9 4.5V9H4.5M19.5 9H15V4.5M15 19.5V15h4.5M4.5 15H9v4.5',
   current: 'M12 4.5v12M7 11.5l5 5 5-5M6 20h12',
 };
 
-const FILLED = new Set(['play']);
+const FILLED = new Set(['play', 'pause']);
 
 @Component({
   selector: 'app-icon',

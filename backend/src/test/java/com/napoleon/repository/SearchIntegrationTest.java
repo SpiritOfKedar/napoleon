@@ -286,6 +286,22 @@ class SearchIntegrationTest {
     }
 
     @Test
+    void unrelatedPassagesAreDroppedRatherThanShown() {
+        MediaFile m = media("talk.mp4");
+        chunk(m, 0, "relevant chunk", vec(1, 2, 0f));
+        chunk(m, 30, "unrelated chunk", vec(1, 2, 0.5f));
+        when(client.embedOne(anyString())).thenReturn(vec(1, 2, 0f));
+        when(client.rerank(anyString(), anyList())).thenAnswer(inv -> {
+            List<String> texts = inv.getArgument(1);
+            return java.util.Optional.of(texts.stream().map(t -> t.startsWith("relevant") ? 0.4 : 0.002).toList());
+        });
+
+        List<SearchResultDto> results = searchService.search(new SearchRequest("anything", 5, null));
+
+        assertThat(results).extracting(SearchResultDto::text).containsExactly("relevant chunk");
+    }
+
+    @Test
     void pinpointPrefersSentenceContainingQueryWords() {
         MediaFile m = media("meeting.mp4");
         // Both sentences have the same vector; only the second one says "Lisbon".

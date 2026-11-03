@@ -49,6 +49,9 @@ import { StatusBadge } from '../../shared/status-badge';
             <a mat-button [routerLink]="['/search']" [queryParams]="{ mediaId: m.id }" [disabled]="m.status !== 'INDEXED'">
               <mat-icon>search</mat-icon>Search in
             </a>
+            <button mat-button type="button" color="warn" [disabled]="isProcessing(m.status) || deleting().has(m.id)" (click)="remove(m)">
+              <mat-icon>delete</mat-icon>Delete
+            </button>
           </div>
         </li>
       }
@@ -71,6 +74,8 @@ import { StatusBadge } from '../../shared/status-badge';
 })
 export class LibraryPage {
   private readonly api = inject(ApiService);
+  readonly deleting = signal<ReadonlySet<number>>(new Set());
+  readonly isProcessing = isProcessing;
 
   readonly items = signal<MediaFile[]>([]);
   readonly loaded = signal(false);
@@ -78,6 +83,23 @@ export class LibraryPage {
   readonly error = signal<string | null>(null);
   readonly refresh$ = new Subject<void>();
   readonly fmt = formatTimestamp;
+
+  remove(m: MediaFile): void {
+    if (!window.confirm(`Delete "${m.filename}" and its transcript? This cannot be undone.`)) {
+      return;
+    }
+    this.deleting.update((s) => new Set(s).add(m.id));
+    this.api.deleteMedia(m.id).subscribe({
+      next: () => {
+        this.items.update((list) => list.filter((x) => x.id !== m.id));
+        this.deleting.update((s) => { const n = new Set(s); n.delete(m.id); return n; });
+      },
+      error: (err) => {
+        this.error.set(errorMessage(err));
+        this.deleting.update((s) => { const n = new Set(s); n.delete(m.id); return n; });
+      },
+    });
+  }
 
   constructor() {
     // Each refresh starts a poll that keeps going only while something is still processing.

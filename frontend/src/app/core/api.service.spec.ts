@@ -42,6 +42,15 @@ describe('ApiService', () => {
     expect(result).toEqual([media]);
   });
 
+  it('deletes a media file', () => {
+    let done = false;
+    api.deleteMedia(1).subscribe(() => (done = true));
+    const req = http.expectOne(`${base}/media/1`);
+    expect(req.request.method).toBe('DELETE');
+    req.flush(null, { status: 204, statusText: 'No Content' });
+    expect(done).toBe(true);
+  });
+
   it('gets one media file and its transcript', () => {
     api.getMedia(1).subscribe();
     http.expectOne(`${base}/media/1`).flush(media);

@@ -13,6 +13,11 @@ export class ApiService {
     return this.http.get<MediaFile[]>(`${this.base}/media`);
   }
 
+  /** Removes the file, its transcript and its stored media. Fails with 409 while it is still processing. */
+  deleteMedia(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.base}/media/${id}`);
+  }
+
   getMedia(id: number): Observable<MediaFile> {
     return this.http.get<MediaFile>(`${this.base}/media/${id}`);
   }

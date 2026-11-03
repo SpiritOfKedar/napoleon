@@ -213,4 +213,36 @@ class SearchIntegrationTest {
         assertThat(after.getStatus()).isEqualTo(MediaStatus.FAILED);
         assertThat(after.getErrorMessage()).contains("Could not decode media");
     }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    com.napoleon.service.MediaService mediaService;
+
+    @Test
+    void deleteRemovesTranscriptAndStoredFile() throws Exception {
+        Path file = Files.writeString(mediaDir.resolve("gone.mp4"), "x");
+        MediaFile m = mediaRepo.save(new MediaFile("gone.mp4", file.toString(), "video/mp4", 1L));
+        m.setStatus(MediaStatus.INDEXED);
+        mediaRepo.save(m);
+        chunk(m, 0, "soon deleted", vec(1, 2, 0f));
+        segmentRepo.save(new TranscriptSegment(m.getId(), 0, 0, 4, "soon deleted", VectorFormat.toLiteral(vec(1, 2, 0f))));
+
+        mediaService.delete(m.getId());
+
+        assertThat(mediaRepo.findById(m.getId())).isEmpty();
+        assertThat(chunkRepo.countByMediaFileId(m.getId())).isZero();
+        assertThat(segmentRepo.findByMediaFileIdOrderBySeq(m.getId())).isEmpty();
+        assertThat(Files.exists(file)).isFalse();
+    }
+
+    @Test
+    void deleteWhileTranscribingIsRefused() {
+        MediaFile m = mediaRepo.save(new MediaFile("busy.mp4", mediaDir.resolve("busy.mp4").toString(), "video/mp4", 1L));
+        m.setStatus(MediaStatus.TRANSCRIBING);
+        mediaRepo.save(m);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> mediaService.delete(m.getId()))
+                .isInstanceOf(com.napoleon.service.ConflictException.class);
+        assertThat(mediaRepo.findById(m.getId())).isPresent();
+    }
 }
+

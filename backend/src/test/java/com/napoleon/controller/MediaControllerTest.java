@@ -44,6 +44,29 @@ class MediaControllerTest {
     }
 
     @Test
+    void deleteReturnsNoContent() throws Exception {
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/media/1"))
+                .andExpect(status().isNoContent());
+        org.mockito.Mockito.verify(mediaService).delete(1L);
+    }
+
+    @Test
+    void deleteWhileProcessingIsConflict() throws Exception {
+        org.mockito.Mockito.doThrow(new com.napoleon.service.ConflictException("still being processed"))
+                .when(mediaService).delete(1L);
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/media/1"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("still being processed"));
+    }
+
+    @Test
+    void deleteUnknownIdIsNotFound() throws Exception {
+        org.mockito.Mockito.doThrow(new NotFoundException("Media 9 not found")).when(mediaService).delete(9L);
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/media/9"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     void streamWithoutRangeReturnsWholeFile() throws Exception {
         givenStream("0123456789");
         mvc.perform(get("/api/media/1/stream"))

@@ -1,6 +1,7 @@
 package com.napoleon.service;
 
 import com.napoleon.domain.MediaFile;
+import com.napoleon.domain.MediaStatus;
 import com.napoleon.dto.MediaFileDto;
 import com.napoleon.dto.TranscriptSegmentDto;
 import com.napoleon.repository.MediaFileRepository;
@@ -67,6 +68,21 @@ public class MediaService {
         // save() has committed by now (no surrounding transaction), so the worker will see the row.
         processing.processAsync(media.getId());
         return MediaFileDto.from(media);
+    }
+
+    /**
+     * Removes the file, its transcript and its stored media. Refused while the file is still being
+     * processed, because the worker would otherwise keep writing to a deleted row.
+     */
+    public void delete(long id) {
+        MediaFile media = find(id);
+        if (media.getStatus() == MediaStatus.UPLOADED || media.getStatus() == MediaStatus.TRANSCRIBING) {
+            throw new ConflictException("Media " + id + " is still being processed; delete it once it has finished");
+        }
+        // Segments and chunks go with the row (ON DELETE CASCADE). The file goes after the row, so a
+        // failed database delete never leaves a row pointing at a missing file.
+        mediaRepo.deleteById(id);
+        storage.deleteQuietly(media.getStoragePath());
     }
 
     public List<MediaFileDto> list() {

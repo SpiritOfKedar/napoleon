@@ -3,6 +3,7 @@ package com.napoleon.controller;
 import com.napoleon.client.TranscriptionClientException;
 import com.napoleon.dto.ErrorResponse;
 import com.napoleon.service.BadRequestException;
+import com.napoleon.service.ConflictException;
 import com.napoleon.service.NotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
@@ -33,6 +34,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NotFoundException.class)
     ResponseEntity<ErrorResponse> notFound(NotFoundException e, HttpServletRequest req) {
         return build(HttpStatus.NOT_FOUND, e.getMessage(), req, null);
+    }
+
+    @ExceptionHandler(ConflictException.class)
+    ResponseEntity<ErrorResponse> conflict(ConflictException e, HttpServletRequest req) {
+        return build(HttpStatus.CONFLICT, e.getMessage(), req, null);
     }
 
     @ExceptionHandler(NoResourceFoundException.class)

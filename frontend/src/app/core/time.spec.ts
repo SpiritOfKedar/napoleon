@@ -1,4 +1,4 @@
-import { formatTimestamp, parseSeconds } from './time';
+import { formatTimestamp, parseSeconds, formatEta, formatDuration, formatClock } from './time';
 
 describe('formatTimestamp', () => {
   it('formats zero', () => {
@@ -43,5 +43,29 @@ describe('parseSeconds', () => {
     expect(parseSeconds('')).toBeNull();
     expect(parseSeconds('-1')).toBeNull();
     expect(parseSeconds('abc')).toBeNull();
+  });
+});
+
+describe('formatEta', () => {
+  it('rounds to friendly units', () => {
+    expect(formatEta(20)).toBe('Less than a minute remaining');
+    expect(formatEta(4 * 60 + 10)).toBe('About 4 minutes remaining');
+    expect(formatEta(72 * 60)).toBe('About 1 hr 12 min remaining');
+    expect(formatEta(120 * 60)).toBe('About 2 hr remaining');
+  });
+
+  it('formats clock positions', () => {
+    expect(formatClock(245)).toBe('4:05');
+    expect(formatClock(2091)).toBe('34:51');
+    expect(formatClock(3730)).toBe('1:02:10');
+  });
+});
+
+describe('formatDuration', () => {
+  it('formats short and long durations', () => {
+    expect(formatDuration(36)).toBe('36s');
+    expect(formatDuration(252)).toBe('4m 12s');
+    expect(formatDuration(4081)).toBe('1h 08m');
+    expect(formatDuration(null)).toBe('—');
   });
 });

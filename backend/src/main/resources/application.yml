@@ -44,7 +44,7 @@ napoleon:
     # The stream carries a heartbeat every ~15 s, so this only fires if the service is gone.
     stream-idle-timeout: ${TRANSCRIPTION_STREAM_IDLE_TIMEOUT:5m}
   embedding:
-    model: ${EMBEDDING_MODEL:sentence-transformers/all-MiniLM-L6-v2}
+    model: ${EMBEDDING_MODEL:intfloat/multilingual-e5-small}
     dim: ${EMBEDDING_DIM:384}
     batch-size: ${EMBED_BATCH_SIZE:32}
   chunking:
@@ -54,6 +54,10 @@ napoleon:
     worker-threads: ${PROCESSING_WORKER_THREADS:2}
   search:
     default-limit: ${SEARCH_DEFAULT_LIMIT:10}
+    # Candidates from vector + keyword retrieval that the cross-encoder re-scores. More = better
+    # recall, slower queries (~15 ms per candidate on CPU).
+    candidates: ${SEARCH_CANDIDATES:30}
+    rerank: ${SEARCH_RERANK:true}
 
 management:
   endpoints:

@@ -18,6 +18,11 @@ export class ApiService {
     return this.http.delete<void>(`${this.base}/media/${id}`);
   }
 
+  /** Transcribes the file again from scratch (e.g. after switching to a better Whisper model). */
+  reprocessMedia(id: number): Observable<MediaFile> {
+    return this.http.post<MediaFile>(`${this.base}/media/${id}/reprocess`, null);
+  }
+
   getMedia(id: number): Observable<MediaFile> {
     return this.http.get<MediaFile>(`${this.base}/media/${id}`);
   }

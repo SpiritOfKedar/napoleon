@@ -36,5 +36,9 @@ public record NapoleonProperties(
 
     public record Processing(@Positive int workerThreads) {}
 
-    public record Search(@Positive int defaultLimit) {}
+    /**
+     * @param candidates fused candidates considered (and reranked) per query
+     * @param rerank     re-score candidates with the cross-encoder in the transcription service
+     */
+    public record Search(@Positive int defaultLimit, @Positive int candidates, boolean rerank) {}
 }

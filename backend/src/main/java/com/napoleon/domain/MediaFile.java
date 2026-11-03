@@ -43,6 +43,13 @@ public class MediaFile {
     @Column(name = "progress_pct")
     private Double progressPct;
 
+    /** Embedding model that produced this file's vectors; null for files indexed before V3. */
+    @Column(name = "embedding_model")
+    private String embeddingModel;
+
+    @Column(name = "processing_started_at")
+    private Instant processingStartedAt;
+
     @Column(name = "error_message")
     private String errorMessage;
 
@@ -82,6 +89,10 @@ public class MediaFile {
     public MediaStatus getStatus() { return status; }
     public Double getProgressPct() { return progressPct; }
     public String getErrorMessage() { return errorMessage; }
+    public String getEmbeddingModel() { return embeddingModel; }
+    public Instant getProcessingStartedAt() { return processingStartedAt; }
+    public void setEmbeddingModel(String embeddingModel) { this.embeddingModel = embeddingModel; }
+    public void setProcessingStartedAt(Instant processingStartedAt) { this.processingStartedAt = processingStartedAt; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 

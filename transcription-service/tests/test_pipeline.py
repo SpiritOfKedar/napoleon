@@ -138,3 +138,28 @@ def test_stream_endpoint_rejects_bad_paths(monkeypatch, tmp_path, path, status):
     monkeypatch.setattr(main, "settings", main.settings.__class__(media_root=str(tmp_path), work_dir=str(tmp_path)))
     with TestClient(main.app) as client:
         assert client.post("/transcribe/stream", json={"path": path}).status_code == status
+
+
+def seg(start, end, text):
+    return {"start_sec": start, "end_sec": end, "text": text}
+
+
+def test_merge_joins_fragments_into_sentences():
+    raw = [seg(0, 1.2, "I was like"), seg(1.2, 2.5, "a very nerdy"), seg(2.5, 4.0, "kid."),
+           seg(4.1, 5.0, "Um"), seg(5.0, 7.5, "and then it changed?")]
+    out = list(pipeline.merge_segments(raw, min_sec=3, max_sec=15, max_gap_sec=1.5))
+    assert [s["text"] for s in out] == ["I was like a very nerdy kid.", "Um and then it changed?"]
+    assert (out[0]["start_sec"], out[0]["end_sec"]) == (0, 4.0)
+
+
+def test_merge_splits_on_long_pause_and_max_length():
+    raw = [seg(0, 2, "one"), seg(10, 12, "two"), seg(12, 20, "three"), seg(20, 28, "four")]
+    out = list(pipeline.merge_segments(raw, min_sec=3, max_sec=15, max_gap_sec=1.5))
+    assert [s["text"] for s in out] == ["one", "two three", "four"]
+
+
+def test_merge_short_sentence_keeps_growing_until_min_length():
+    # "Yes." alone is under min_sec, so it is joined with what follows.
+    raw = [seg(0, 0.8, "Yes."), seg(0.8, 4.0, "That is right.")]
+    out = list(pipeline.merge_segments(raw, min_sec=3, max_sec=15, max_gap_sec=1.5))
+    assert [s["text"] for s in out] == ["Yes. That is right."]

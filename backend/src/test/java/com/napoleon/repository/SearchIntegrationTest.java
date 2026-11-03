@@ -244,5 +244,74 @@ class SearchIntegrationTest {
                 .isInstanceOf(com.napoleon.service.ConflictException.class);
         assertThat(mediaRepo.findById(m.getId())).isPresent();
     }
-}
 
+    @Autowired
+    com.napoleon.service.EmbeddingRefresher refresher;
+
+    @Autowired
+    org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+    @Test
+    void keywordMatchLiftsRareNameIntoResults() {
+        MediaFile m = media("interview.mp4");
+        // Four chunks are semantically close to the query and all say "think"; the one that
+        // actually mentions Elon is semantically far, so vectors alone would rank it last.
+        for (int i = 0; i < 4; i++) {
+            chunk(m, i * 30, "I think we think about many things " + i, vec(1, 10 + i, 0.2f * (i + 1)));
+        }
+        chunk(m, 200, "then I wrote to Elon about starting it", vec(9, 8, 0f));
+        when(client.embedOne(anyString())).thenReturn(vec(1, 2, 0f));
+
+        List<SearchResultDto> results = searchService.search(new SearchRequest("what does he think about Elon", 3, null));
+
+        assertThat(results).extracting(SearchResultDto::text).anyMatch(t -> t.contains("Elon"));
+    }
+
+    @Test
+    void crossEncoderScoresDecideFinalOrder() {
+        MediaFile m = media("talk.mp4");
+        chunk(m, 0, "alpha chunk", vec(1, 2, 0f));
+        chunk(m, 30, "beta chunk", vec(1, 2, 0.5f));
+        chunk(m, 60, "gamma chunk", vec(1, 2, 1.0f));
+        when(client.embedOne(anyString())).thenReturn(vec(1, 2, 0f));
+        when(client.rerank(anyString(), anyList())).thenAnswer(inv -> {
+            List<String> texts = inv.getArgument(1);
+            return java.util.Optional.of(texts.stream().map(t -> t.startsWith("gamma") ? 0.9 : t.startsWith("beta") ? 0.5 : 0.1).toList());
+        });
+
+        List<SearchResultDto> results = searchService.search(new SearchRequest("anything", 3, null));
+
+        assertThat(results).extracting(SearchResultDto::text).containsExactly("gamma chunk", "beta chunk", "alpha chunk");
+        assertThat(results.getFirst().score()).isEqualTo(0.9);
+    }
+
+    @Test
+    void pinpointPrefersSentenceContainingQueryWords() {
+        MediaFile m = media("meeting.mp4");
+        // Both sentences have the same vector; only the second one says "Lisbon".
+        segmentRepo.save(new TranscriptSegment(m.getId(), 0, 0, 10, "we will meet somewhere nice", VectorFormat.toLiteral(vec(1, 2, 0f))));
+        segmentRepo.save(new TranscriptSegment(m.getId(), 1, 10, 20, "the offsite is in Lisbon", VectorFormat.toLiteral(vec(1, 2, 0f))));
+        chunkRepo.save(new TranscriptChunk(m.getId(), 0, 20, "we will meet somewhere nice the offsite is in Lisbon", VectorFormat.toLiteral(vec(1, 2, 0f))));
+        when(client.embedOne(anyString())).thenReturn(vec(1, 2, 0f));
+
+        SearchResultDto top = searchService.search(new SearchRequest("Lisbon offsite", 1, null)).getFirst();
+
+        assertThat(top.startSec()).isEqualTo(10.0);
+    }
+
+    @Test
+    void refresherReembedsFilesFromAnOlderModel() {
+        MediaFile m = media("old.mp4");
+        segmentRepo.save(new TranscriptSegment(m.getId(), 0, 0, 4, "hello", VectorFormat.toLiteral(vec(3, 4, 0f))));
+        chunk(m, 0, "hello", vec(3, 4, 0f));
+        when(client.embed(anyList())).thenAnswer(inv -> ((List<?>) inv.getArgument(0)).stream().map(t -> vec(7, 8, 0f)).toList());
+
+        assertThat(refresher.refresh(m.getId())).isEqualTo(2);
+
+        assertThat(jdbc.queryForObject("SELECT embedding_model FROM media_file WHERE id = ?", String.class, m.getId()))
+                .isEqualTo("intfloat/multilingual-e5-small");
+        Double sim = jdbc.queryForObject("SELECT 1 - (embedding <=> CAST(? AS vector)) FROM transcript_chunk WHERE media_file_id = ?",
+                Double.class, VectorFormat.toLiteral(vec(7, 8, 0f)), m.getId());
+        assertThat(sim).isCloseTo(1.0, org.assertj.core.data.Offset.offset(1e-4));
+    }
+}

@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import threading
 import time
+from typing import Literal
 from contextlib import asynccontextmanager, closing
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -15,8 +16,8 @@ from pydantic import BaseModel, Field
 
 from .audio import MediaDecodeError, probe_duration
 from .config import VALID_MODEL_SIZES, settings
-from .embedder import Embedder
-from .pipeline import transcribe_windows
+from .embedder import Embedder, Reranker
+from .pipeline import merge_segments, transcribe_windows
 from .transcriber import TranscriptionError, build_transcriber
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -24,6 +25,7 @@ log = logging.getLogger("transcription-service")
 
 transcriber = build_transcriber()
 embedder = Embedder()
+reranker = Reranker()
 # Limits how many files are transcribed at once (see WHISPER_CONCURRENCY).
 transcription_slots = threading.BoundedSemaphore(max(1, settings.whisper_concurrency))
 
@@ -37,6 +39,7 @@ async def lifespan(_: FastAPI):
         t = time.time()
         await run_in_threadpool(transcriber.load)
         await run_in_threadpool(embedder.load)
+        await run_in_threadpool(reranker.load)
         log.info("Models loaded in %.1fs", time.time() - t)
     yield
 
@@ -65,6 +68,18 @@ class StreamRequest(BaseModel):
 
 class EmbedRequest(BaseModel):
     texts: list[str] = Field(min_length=1)
+    # "query" for search queries, "passage" for transcript text (asymmetric models need to know).
+    kind: Literal["query", "passage"] = "passage"
+
+
+class RerankRequest(BaseModel):
+    query: str = Field(min_length=1)
+    texts: list[str] = Field(min_length=1)
+
+
+class RerankResponse(BaseModel):
+    model: str
+    scores: list[float]
 
 
 class EmbedResponse(BaseModel):
@@ -81,6 +96,8 @@ def health():
         "whisper_model_size": settings.whisper_model_size,
         "embedding_model": settings.embedding_model,
         "embedding_dim": settings.embedding_dim,
+        "rerank_model": settings.rerank_model or None,
+        "whisper_batch_size": settings.whisper_batch_size,
     }
 
 
@@ -91,8 +108,9 @@ def _transcribe_all(src: str, duration: float | None, start_offset: float, workd
         if cancel is not None and cancel.is_set():
             return
     try:
-        yield from transcribe_windows(src, duration, start_offset, transcriber, workdir, state,
-                                      bitrate=settings.openai_audio_bitrate)
+        raw = transcribe_windows(src, duration, start_offset, transcriber, workdir, state,
+                                 bitrate=settings.openai_audio_bitrate)
+        yield from merge_segments(raw, settings.merge_min_sec, settings.merge_max_sec, settings.merge_max_gap_sec)
     finally:
         transcription_slots.release()
 
@@ -210,5 +228,15 @@ async def transcribe_stream(req: StreamRequest):
 async def embed(req: EmbedRequest):
     if len(req.texts) > settings.embed_max_batch:
         raise HTTPException(status_code=413, detail=f"At most {settings.embed_max_batch} texts per request")
-    vectors = await run_in_threadpool(embedder.embed, req.texts)
+    vectors = await run_in_threadpool(embedder.embed, req.texts, req.kind)
     return EmbedResponse(model=settings.embedding_model, dim=settings.embedding_dim, vectors=vectors)
+
+
+@app.post("/rerank", response_model=RerankResponse)
+async def rerank(req: RerankRequest):
+    if not reranker.enabled:
+        raise HTTPException(status_code=404, detail="Reranking is disabled (RERANK_MODEL is empty)")
+    if len(req.texts) > settings.rerank_max_batch:
+        raise HTTPException(status_code=413, detail=f"At most {settings.rerank_max_batch} texts per request")
+    scores = await run_in_threadpool(reranker.score, req.query, req.texts)
+    return RerankResponse(model=settings.rerank_model, scores=scores)

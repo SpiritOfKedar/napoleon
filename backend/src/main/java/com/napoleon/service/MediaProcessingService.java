@@ -6,6 +6,7 @@ import com.napoleon.config.NapoleonProperties;
 import com.napoleon.domain.MediaFile;
 import com.napoleon.domain.MediaStatus;
 import com.napoleon.repository.MediaFileRepository;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
@@ -27,6 +28,8 @@ public class MediaProcessingService {
 
     private static final Logger log = LoggerFactory.getLogger(MediaProcessingService.class);
     private static final int MAX_ERROR_LENGTH = 2000;
+    /** First boot downloads models; give the service plenty of time before failing a file. */
+    private static final java.time.Duration READY_TIMEOUT = java.time.Duration.ofMinutes(30);
     /** Progress stays below this until chunks are written and the file is really INDEXED. */
     private static final double MAX_STREAMING_PROGRESS = 99.0;
 
@@ -65,7 +68,10 @@ public class MediaProcessingService {
         try {
             // TRANSCRIBING at this point means a previous run was cut off (ProcessingRecovery).
             boolean interrupted = media.getStatus() == MediaStatus.TRANSCRIBING;
+            // If the service is still starting (e.g. after a restart), wait instead of failing the file.
+            client.awaitReady(READY_TIMEOUT);
             media.setStatus(MediaStatus.TRANSCRIBING);
+            media.setProcessingStartedAt(Instant.now());
             media = mediaRepo.save(media);
 
             long t0 = System.currentTimeMillis();

@@ -85,6 +85,23 @@ public class MediaService {
         storage.deleteQuietly(media.getStoragePath());
     }
 
+    /**
+     * Transcribes and indexes the file again from scratch, e.g. after switching to a more accurate
+     * Whisper model. The old transcript is dropped when processing starts, so the file is not
+     * searchable until it is INDEXED again.
+     */
+    public MediaFileDto reprocess(long id) {
+        MediaFile media = find(id);
+        if (media.getStatus() == MediaStatus.UPLOADED || media.getStatus() == MediaStatus.TRANSCRIBING) {
+            throw new ConflictException("Media " + id + " is already being processed");
+        }
+        media.setStatus(MediaStatus.UPLOADED);
+        media.setProgressPct(null);
+        media = mediaRepo.save(media);
+        processing.processAsync(media.getId());
+        return MediaFileDto.from(media);
+    }
+
     public List<MediaFileDto> list() {
         return mediaRepo.findAllByOrderByCreatedAtDesc().stream().map(MediaFileDto::from).toList();
     }

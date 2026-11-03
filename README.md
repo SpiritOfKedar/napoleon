@@ -39,8 +39,8 @@ docker compose up -d --build
 Or use `make up` (or `npm run up` on machines without `make`). It waits until every service is
 healthy, then runs the seed.
 
-The first start takes a few minutes because it downloads the Whisper `base` model (~150 MB) and the
-embedding model (~90 MB) into the `model-cache` volume. Later starts are fast. Check progress with
+The first start takes a few minutes because it downloads the Whisper `small` model (~480 MB), the
+multilingual embedding model (~470 MB) and the reranker (~470 MB) into the `model-cache` volume. Later starts are fast. Check progress with
 `docker compose ps` or `make logs`.
 
 Then open **http://localhost:4200**.
@@ -100,7 +100,9 @@ endpoint answers a Range request with `206`.
 | `POST` | `/api/media` | multipart `file`; returns `202` + the MediaFile; processing runs in the background |
 | `GET` | `/api/media` | all media, newest first |
 | `GET` | `/api/media/{id}` | one media file with `status` and `errorMessage` |
-| `GET` | `/api/media/{id}/transcript` | Whisper segments `[{startSec, endSec, text}]` |
+| `GET` | `/api/media/{id}/transcript` | sentence segments `[{startSec, endSec, text}]` |
+| `POST` | `/api/media/{id}/reprocess` | transcribe again with the current model (`409` while processing) |
+| `DELETE` | `/api/media/{id}` | delete the file and its transcript (`409` while processing) |
 | `GET` | `/api/media/{id}/stream` | the file, with HTTP Range support (`206 Partial Content`) |
 | `GET` | `/api/search?q=&limit=10&mediaId=` | `[{mediaId, mediaFilename, startSec, endSec, chunkStartSec, chunkEndSec, text, score}]` |
 | `GET` | `/actuator/health` | health |
@@ -121,19 +123,27 @@ curl -H "Content-Type: application/json" -d '{"texts":["hello world"]}' http://l
 
 ## How search works
 
-1. **Transcribe.** ffmpeg converts the upload to 16 kHz mono WAV, and faster-whisper (with VAD)
-   returns timestamped segments.
+1. **Transcribe.** ffmpeg cuts the audio into 30-minute windows of 16 kHz mono. faster-whisper
+   (`small`, batched, with VAD) transcribes each one, or Groq/OpenAI does if configured. Whisper's
+   short fragments ("Um", "I was not") are merged into sentence-sized segments of 3–15 s, so a
+   result points at a whole sentence.
 2. **Chunk.** Segments are grouped into windows of about 30 s. Each new window starts at the
    segment that covers the previous window's last 5 s, so every boundary overlaps by at least 5 s
    and a phrase that crosses a boundary is still whole in one chunk. Segments are never split. See
    `backend/.../service/Chunker.java`.
-3. **Embed.** Chunks *and* individual segments are embedded with `all-MiniLM-L6-v2` (384-dim,
-   L2-normalized) in batches.
-4. **Search.** The query is embedded. Postgres finds the nearest chunks by cosine distance using an
-   HNSW index. Then, inside each of those chunks, it picks the segment closest to the query (a
-   `LATERAL` subquery). The result's `startSec` is that segment's start, so playback lands on the
-   sentence instead of the start of a 30 s window. Overlapping chunks that point at the same
-   sentence are de-duplicated. `score` is the chunk's cosine similarity.
+3. **Embed.** Chunks *and* segments are embedded with `multilingual-e5-small` (384-dim, ~100
+   languages; a query in English can find speech in Hindi or Tamil). Postgres also keeps a
+   full-text index of the same text.
+4. **Retrieve.** Two candidate lists are built in one SQL query: the nearest chunks by meaning
+   (pgvector HNSW), and the chunks that contain the query's words, scored so that rare words count
+   more than common ones (names like "Elon" or terms like "GPT-4" stand out). The lists are merged
+   with reciprocal rank fusion.
+5. **Rerank.** A multilingual cross-encoder reads the query together with each of the top 30
+   candidates and scores how well the passage answers it. This is what makes exact wording matter.
+   `score` is that relevance (0–1).
+6. **Pinpoint.** Inside each hit, the sentence closest to the query, with a bonus for sentences that
+   contain the query's words, becomes `startSec`, so playback lands on the moment it was said.
+   Overlapping chunks that point at the same sentence are de-duplicated.
 
 ## Configuration
 
@@ -142,10 +152,12 @@ The ones you are most likely to change:
 
 | Variable | Default | |
 |---|---|---|
-| `WHISPER_BACKEND` | `local` | `local` (faster-whisper) or `openai` (OpenAI API; set `OPENAI_API_KEY`; audio is sent as 32 kbit/s MP3 in 20-minute pieces to stay under its 25 MB limit) |
-| `WHISPER_MODEL_SIZE` | `base` | `tiny`, `base`, `small`, `medium`, `large-v3` |
+| `WHISPER_BACKEND` | `local` | `local` (faster-whisper, free and private), `groq` (hosted large-v3-turbo: most accurate, ~1 min per audio hour; set `GROQ_API_KEY`) or `openai` (set `OPENAI_API_KEY`). Hosted audio goes up as 32 kbit/s MP3 in 20-minute pieces. |
+| `WHISPER_MODEL_SIZE` | `small` | `base` (fastest, more errors), `small`, `large-v3-turbo` (best local accuracy, ~4x slower); see `.env.example` for measured speeds |
+| `WHISPER_BATCH_SIZE` / `WHISPER_BEAM_SIZE` | `8` / `1` | batched greedy decoding: ~14x realtime for `small` on an 8-core CPU |
 | `WHISPER_LANGUAGE` | *(auto)* | e.g. `en` to skip language detection |
-| `EMBEDDING_MODEL` / `EMBEDDING_DIM` | `all-MiniLM-L6-v2` / `384` | must match each other; see the warning below |
+| `EMBEDDING_MODEL` / `EMBEDDING_DIM` | `multilingual-e5-small` / `384` | must match each other; see the warning below. A new 384-dim model re-embeds existing files automatically on startup |
+| `RERANK_MODEL` | `mmarco-mMiniLMv2-L12-H384-v1` | cross-encoder for final ranking; empty disables it |
 | `CHUNK_WINDOW_SEC` / `CHUNK_OVERLAP_SEC` | `30` / `5` | applies to newly processed files |
 | `MAX_UPLOAD_SIZE` | `5GB` | Spring size syntax |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | only needed when the UI and API are on different origins |

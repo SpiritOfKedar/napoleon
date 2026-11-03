@@ -12,6 +12,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -43,7 +46,11 @@ public class TranscriptionClient {
         void onSegment(Segment segment);
     }
 
-    record EmbedRequest(List<String> texts) {}
+    record EmbedRequest(List<String> texts, String kind) {}
+
+    record RerankRequest(String query, List<String> texts) {}
+
+    record RerankResponse(String model, List<Double> scores) {}
 
     record EmbedResponse(String model, int dim, List<float[]> vectors) {}
 
@@ -58,6 +65,7 @@ public class TranscriptionClient {
                       String language,
                       String detail) {}
 
+    private static final Logger log = LoggerFactory.getLogger(TranscriptionClient.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final RestClient restClient;
@@ -83,6 +91,40 @@ public class TranscriptionClient {
         factory.setConnectTimeout(connectTimeout);
         factory.setReadTimeout(readTimeout);
         return factory;
+    }
+
+    /** True when the service answers /health (it only does once its models are loaded). */
+    public boolean healthy() {
+        try {
+            restClient.get().uri("/health").retrieve().toBodilessEntity();
+            return true;
+        } catch (RestClientException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Blocks until the service is healthy, checking every few seconds. A service that is still
+     * starting (loading models takes minutes on first boot) must not fail files permanently.
+     */
+    public void awaitReady(Duration max) {
+        long deadline = System.nanoTime() + max.toNanos();
+        boolean logged = false;
+        while (!healthy()) {
+            if (System.nanoTime() > deadline) {
+                throw new TranscriptionClientException("Transcription service did not become ready within " + max);
+            }
+            if (!logged) {
+                log.info("Waiting for the transcription service to become ready");
+                logged = true;
+            }
+            try {
+                Thread.sleep(5_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new TranscriptionClientException("Interrupted while waiting for the transcription service");
+            }
+        }
     }
 
     /** Upload-based transcription: sends the whole file and waits for the whole transcript. */
@@ -169,12 +211,17 @@ public class TranscriptionClient {
         throw new TranscriptionClientException("Transcription stream ended before it was complete");
     }
 
+    /** Embeds transcript text (segments, chunks). */
     public List<float[]> embed(List<String> texts) {
+        return embed(texts, "passage");
+    }
+
+    private List<float[]> embed(List<String> texts, String kind) {
         try {
             EmbedResponse response = restClient.post()
                     .uri("/embed")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(new EmbedRequest(texts))
+                    .body(new EmbedRequest(texts, kind))
                     .retrieve()
                     .body(EmbedResponse.class);
             if (response == null || response.vectors() == null || response.vectors().size() != texts.size()) {
@@ -194,8 +241,32 @@ public class TranscriptionClient {
         }
     }
 
+    /** Embeds a search query. Asymmetric models (e5) encode queries differently from passages. */
     public float[] embedOne(String text) {
-        return embed(List.of(text)).getFirst();
+        return embed(List.of(text), "query").getFirst();
+    }
+
+    /**
+     * Relevance of each text to the query, 0..1, from the cross-encoder. Returns empty when the
+     * service has reranking disabled or fails, so search can fall back to its own ranking.
+     */
+    public Optional<List<Double>> rerank(String query, List<String> texts) {
+        try {
+            RerankResponse response = restClient.post()
+                    .uri("/rerank")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(new RerankRequest(query, texts))
+                    .retrieve()
+                    .body(RerankResponse.class);
+            if (response == null || response.scores() == null || response.scores().size() != texts.size()) {
+                log.warn("Reranker returned the wrong number of scores; using fused ranking");
+                return Optional.empty();
+            }
+            return Optional.of(response.scores());
+        } catch (RestClientException e) {
+            log.warn("Reranking unavailable, using fused ranking: {}", e.getMessage());
+            return Optional.empty();
+        }
     }
 
     private static String extractDetail(RestClientResponseException e) {

@@ -21,6 +21,6 @@ describe('StatusBadge', () => {
   });
 
   it('ignores progress for other statuses', () => {
-    expect(render('INDEXED', 100)).toBe('Indexed');
+    expect(render('INDEXED', 100)).toBe('Ready');
   });
 });

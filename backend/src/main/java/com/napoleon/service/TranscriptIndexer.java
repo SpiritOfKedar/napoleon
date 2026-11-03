@@ -1,5 +1,6 @@
 package com.napoleon.service;
 
+import com.napoleon.config.NapoleonProperties;
 import com.napoleon.domain.MediaFile;
 import com.napoleon.domain.MediaStatus;
 import com.napoleon.repository.MediaFileRepository;
@@ -39,10 +40,12 @@ public class TranscriptIndexer {
 
     private final MediaFileRepository mediaRepo;
     private final JdbcTemplate jdbc;
+    private final String embeddingModel;
 
-    public TranscriptIndexer(MediaFileRepository mediaRepo, JdbcTemplate jdbc) {
+    public TranscriptIndexer(MediaFileRepository mediaRepo, JdbcTemplate jdbc, NapoleonProperties props) {
         this.mediaRepo = mediaRepo;
         this.jdbc = jdbc;
+        this.embeddingModel = props.embedding().model();
     }
 
     public record EmbeddedSegment(Chunker.Segment segment, float[] embedding) {}
@@ -129,6 +132,7 @@ public class TranscriptIndexer {
             media.setDurationSec(durationSec);
         }
         media.setProgressPct(100.0);
+        media.setEmbeddingModel(embeddingModel);
         media.setStatus(MediaStatus.INDEXED);
     }
 }

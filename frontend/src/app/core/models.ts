@@ -11,6 +11,8 @@ export interface MediaFile {
   status: MediaStatus;
   /** 0..100 while TRANSCRIBING; null before transcription starts. */
   progressPct: number | null;
+  /** When the current transcription started (ISO); used for the time-remaining estimate. */
+  processingStartedAt: string | null;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
@@ -33,7 +35,7 @@ export interface SearchResult {
   chunkStartSec: number;
   chunkEndSec: number;
   text: string;
-  /** Cosine similarity, roughly 0..1. */
+  /** Relevance 0..1 (cross-encoder score; cosine similarity if reranking is off). */
   score: number;
 }
 

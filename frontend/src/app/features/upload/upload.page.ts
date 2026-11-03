@@ -1,13 +1,11 @@
 import { HttpEventType } from '@angular/common/http';
-import { Component, DestroyRef, OnDestroy, inject, signal } from '@angular/core';
-import { MatButtonModule } from '@angular/material/button';
-import { MatIconModule } from '@angular/material/icon';
-import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
-import { environment } from '../../../environments/environment';
 import { ApiService, errorMessage } from '../../core/api.service';
-import { MediaFile, isProcessing } from '../../core/models';
+import { MediaStore } from '../../core/media-store';
+import { MediaFile } from '../../core/models';
+import { Icon } from '../../shared/icon';
 import { StatusBadge } from '../../shared/status-badge';
 
 interface UploadItem {
@@ -15,7 +13,7 @@ interface UploadItem {
   file: File;
   progress: number; // 0-100, upload only
   phase: 'uploading' | 'uploaded' | 'error';
-  media?: MediaFile;
+  mediaId?: number;
   error?: string;
 }
 
@@ -23,97 +21,109 @@ const ACCEPT = 'audio/*,video/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.flac,.webm,.mp4,
 
 @Component({
   selector: 'app-upload-page',
-  imports: [MatButtonModule, MatIconModule, MatProgressBarModule, RouterLink, StatusBadge],
+  imports: [RouterLink, Icon, StatusBadge],
   template: `
-    <h1>Upload</h1>
-    <div
-      class="dropzone"
-      [class.over]="dragOver()"
-      (dragover)="onDragOver($event)"
-      (dragleave)="dragOver.set(false)"
-      (drop)="onDrop($event)"
-      (click)="input.click()"
-      (keydown.enter)="input.click()"
-      tabindex="0"
-      role="button"
-      aria-label="Choose audio or video files to upload"
-    >
-      <mat-icon class="big">cloud_upload</mat-icon>
-      <p><strong>Drop audio or video files here</strong> or click to choose</p>
-      <p class="hint">MP3, WAV, M4A, MP4, MOV, MKV, WebM…</p>
-      <input #input type="file" multiple [accept]="accept" hidden (change)="onPick(input)" />
-    </div>
+    <header class="toolbar">
+      <h1 class="title-2">Upload</h1>
+    </header>
 
-    @if (items().length) {
-      <ul class="items">
-        @for (item of items(); track item.key) {
-          <li>
-            <div class="row">
-              <mat-icon>{{ item.file.type.startsWith('video') ? 'movie' : 'audiotrack' }}</mat-icon>
-              <span class="name">{{ item.file.name }}</span>
-              @switch (item.phase) {
-                @case ('uploading') { <span class="muted">Uploading {{ item.progress }}%</span> }
-                @case ('error') { <span class="error">{{ item.error }}</span> }
-                @case ('uploaded') {
-                  @if (item.media; as m) {
-                    <app-status-badge [status]="m.status" [progress]="m.progressPct" />
-                    @if (m.status === 'INDEXED') {
-                      <a mat-button [routerLink]="['/player', m.id]">Open</a>
+    <div class="page">
+      <div
+        class="drop"
+        [class.over]="dragOver()"
+        (dragover)="onDragOver($event)"
+        (dragleave)="dragOver.set(false)"
+        (drop)="onDrop($event)"
+      >
+        <app-icon name="upload" [size]="32" />
+        <p class="headline">Drop audio or video files here</p>
+        <p class="footnote">MP4, MOV, MKV, WebM, MP3, WAV, M4A and more, up to 5 GB each.</p>
+        <button class="btn primary" type="button" (click)="input.click()">Choose Files…</button>
+        <input #input type="file" multiple [accept]="accept" hidden (change)="onPick(input)" />
+      </div>
+
+      @if (rows().length) {
+        <h2 class="section">Uploads</h2>
+        <ul class="list" style="--inset: 4rem">
+          @for (r of rows(); track r.item.key) {
+            <li class="row">
+              <span class="kind" aria-hidden="true">
+                <app-icon [name]="r.item.file.type.startsWith('video') ? 'film' : 'waveform'" [size]="18" />
+              </span>
+              <div class="main">
+                <span class="name" [title]="r.item.file.name">{{ r.item.file.name }}</span>
+                @switch (r.item.phase) {
+                  @case ('uploading') {
+                    <span class="bar" role="progressbar" [attr.aria-valuenow]="r.item.progress" aria-valuemin="0" aria-valuemax="100" aria-label="Upload progress">
+                      <span [style.transform]="'scaleX(' + r.item.progress / 100 + ')'"></span>
+                    </span>
+                    <span class="footnote tnum">Uploading… {{ r.item.progress }}% of {{ size(r.item.file.size) }}</span>
+                  }
+                  @case ('error') { <span class="footnote danger-text">{{ r.item.error }}</span> }
+                  @case ('uploaded') {
+                    <span class="footnote tnum">{{ size(r.item.file.size) }}</span>
+                    @if (r.media?.errorMessage) {
+                      <span class="footnote danger-text">{{ r.media?.errorMessage }}</span>
                     }
                   }
                 }
+              </div>
+              @if (r.media; as m) {
+                <app-status-badge [status]="m.status" [progress]="m.progressPct" [startedAt]="m.processingStartedAt" />
+                @if (m.status === 'INDEXED') {
+                  <a class="btn" [routerLink]="['/player', m.id]">Open</a>
+                }
               }
-            </div>
-            @if (item.phase === 'uploading') {
-              <mat-progress-bar mode="determinate" [value]="item.progress" />
-            } @else if (item.media && isProcessing(item.media.status)) {
-              <mat-progress-bar mode="indeterminate" />
-            }
-            @if (item.media?.errorMessage) {
-              <p class="error small">{{ item.media?.errorMessage }}</p>
-            }
-          </li>
-        }
-      </ul>
-    }
+            </li>
+          }
+        </ul>
+      }
+    </div>
   `,
   styles: `
-    .dropzone {
-      border: 2px dashed var(--mat-sys-outline); border-radius: 16px; padding: 40px 16px;
-      text-align: center; cursor: pointer; transition: background .15s, border-color .15s;
+    .drop {
+      display: grid; justify-items: center; gap: 0.5rem; text-align: center; padding: 3.5rem 1.5rem;
+      border-radius: 14px; border: 1.5px dashed var(--separator); color: var(--label-2);
+      transition: background-color 150ms ease-out, border-color 150ms ease-out;
     }
-    .dropzone.over, .dropzone:hover, .dropzone:focus-visible {
-      background: var(--mat-sys-surface-container); border-color: var(--mat-sys-primary); outline: none;
-    }
-    .big { font-size: 48px; width: 48px; height: 48px; color: var(--mat-sys-primary); }
-    .hint, .muted { color: var(--mat-sys-on-surface-variant); }
-    .items { list-style: none; padding: 0; margin-top: 24px; display: grid; gap: 12px; }
-    .items li { padding: 12px; border-radius: 12px; background: var(--mat-sys-surface-container-low); }
-    .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
-    .name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
-    .error { color: var(--mat-sys-error); }
-    .small { font-size: 13px; margin: 6px 0 0; }
+    .drop.over { border-color: var(--accent); border-style: solid; background: var(--accent-tint); }
+    .drop p { margin: 0; }
+    .drop .headline { color: var(--label); margin-top: 0.5rem; }
+    .drop .btn { margin-top: 0.75rem; }
+    .section { margin: 2rem 0 0.5rem; font-size: 0.8125rem; font-weight: 600; color: var(--label-2); }
+    .row { display: flex; align-items: center; gap: 0.875rem; padding: 0.75rem 1rem; }
+    .kind { flex: none; width: 2.25rem; height: 2.25rem; border-radius: 8px; display: grid; place-items: center; background: var(--fill); color: var(--label-2); }
+    .main { flex: 1; min-width: 0; display: grid; gap: 0.25rem; }
+    .name { font-size: 0.9375rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bar { display: block; height: 3px; border-radius: 2px; background: var(--fill-2); overflow: hidden; }
+    .bar span { display: block; height: 100%; background: var(--accent); transform-origin: left; transition: transform 200ms ease-out; }
   `,
 })
-export class UploadPage implements OnDestroy {
+export class UploadPage {
   private readonly api = inject(ApiService);
+  private readonly store = inject(MediaStore);
   private readonly subs = new Subscription();
-  private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private nextKey = 0;
 
   readonly accept = ACCEPT;
   readonly items = signal<UploadItem[]>([]);
   readonly dragOver = signal(false);
-  readonly isProcessing = isProcessing;
+
+  /** Each upload joined with its live server state from the shared store. */
+  readonly rows = computed(() => {
+    const byId = new Map<number, MediaFile>(this.store.items().map((m) => [m.id, m]));
+    return this.items().map((item) => ({ item, media: item.mediaId != null ? byId.get(item.mediaId) : undefined }));
+  });
 
   constructor() {
     inject(DestroyRef).onDestroy(() => this.subs.unsubscribe());
   }
 
-  ngOnDestroy(): void {
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer);
+  size(bytes: number): string {
+    if (bytes >= 1e9) {
+      return `${(bytes / 1e9).toFixed(2)} GB`;
     }
+    return bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1e3))} KB`;
   }
 
   onDragOver(e: DragEvent): void {
@@ -142,8 +152,8 @@ export class UploadPage implements OnDestroy {
             if (event.type === HttpEventType.UploadProgress && event.total) {
               this.patch(key, { progress: Math.round((100 * event.loaded) / event.total) });
             } else if (event.type === HttpEventType.Response && event.body) {
-              this.patch(key, { phase: 'uploaded', progress: 100, media: event.body });
-              this.schedulePoll();
+              this.patch(key, { phase: 'uploaded', progress: 100, mediaId: event.body.id });
+              this.store.refresh(); // the store keeps polling while it is processing
             }
           },
           error: (err) => this.patch(key, { phase: 'error', error: errorMessage(err) }),
@@ -154,29 +164,5 @@ export class UploadPage implements OnDestroy {
 
   private patch(key: number, changes: Partial<UploadItem>): void {
     this.items.update((list) => list.map((i) => (i.key === key ? { ...i, ...changes } : i)));
-  }
-
-  /** Refreshes server status of uploaded files until none is still processing. */
-  private schedulePoll(): void {
-    if (this.pollTimer) {
-      return;
-    }
-    this.pollTimer = setTimeout(() => {
-      this.pollTimer = null;
-      this.subs.add(
-        this.api.listMedia().subscribe({
-          next: (all) => {
-            const byId = new Map(all.map((m) => [m.id, m]));
-            this.items.update((list) =>
-              list.map((i) => (i.media && byId.has(i.media.id) ? { ...i, media: byId.get(i.media.id) } : i)),
-            );
-            if (this.items().some((i) => i.media && isProcessing(i.media.status))) {
-              this.schedulePoll();
-            }
-          },
-          error: () => this.schedulePoll(),
-        }),
-      );
-    }, environment.pollIntervalMs);
   }
 }

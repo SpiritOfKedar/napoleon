@@ -9,7 +9,7 @@ boundary, it is dropped and the next window starts at that segment's start inste
 sentence is transcribed whole in the next window.
 """
 import os
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 
 from .audio import extract_audio
 
@@ -17,6 +17,35 @@ from .audio import extract_audio
 EDGE_SEC = 1.0
 # Treat a window ending this close to the end of the file as the last one.
 END_EPSILON_SEC = 0.05
+
+
+_SENTENCE_END = (".", "?", "!", "…", "।", "॥", "。", "？", "！")
+
+
+def merge_segments(segments: Iterable[dict], min_sec: float, max_sec: float, max_gap_sec: float) -> Iterator[dict]:
+    """Joins Whisper's short fragments into sentence-sized segments.
+
+    A merged segment is emitted when the next fragment starts after a pause longer than
+    max_gap_sec, when adding it would exceed max_sec, or when the segment already ends with
+    sentence punctuation and is at least min_sec long. Fragments are never split.
+    """
+    current: dict | None = None
+    for seg in segments:
+        if current is None:
+            current = dict(seg)
+            continue
+        gap = seg["start_sec"] - current["end_sec"]
+        too_long = seg["end_sec"] - current["start_sec"] > max_sec
+        sentence_done = (current["text"].rstrip().endswith(_SENTENCE_END)
+                         and current["end_sec"] - current["start_sec"] >= min_sec)
+        if gap > max_gap_sec or too_long or sentence_done:
+            yield current
+            current = dict(seg)
+        else:
+            current["end_sec"] = seg["end_sec"]
+            current["text"] = f"{current['text']} {seg['text']}"
+    if current is not None:
+        yield current
 
 
 def _shift(segment: dict, offset: float) -> dict:

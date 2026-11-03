@@ -18,6 +18,7 @@ describe('ApiService', () => {
     durationSec: 900,
     status: 'INDEXED',
     progressPct: 100,
+    processingStartedAt: null,
     errorMessage: null,
     createdAt: '2026-11-03T10:00:00Z',
     updatedAt: '2026-11-03T10:05:00Z',

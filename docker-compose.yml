@@ -21,14 +21,18 @@ services:
     build: ./transcription-service
     environment:
       WHISPER_BACKEND: ${WHISPER_BACKEND:-local}
-      WHISPER_MODEL_SIZE: ${WHISPER_MODEL_SIZE:-base}
+      WHISPER_MODEL_SIZE: ${WHISPER_MODEL_SIZE:-small}
+      WHISPER_BATCH_SIZE: ${WHISPER_BATCH_SIZE:-8}
+      WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-1}
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_WHISPER_MODEL: ${OPENAI_WHISPER_MODEL:-whisper-1}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_WHISPER_MODEL: ${GROQ_WHISPER_MODEL:-whisper-large-v3-turbo}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
       EMBEDDING_DIM: ${EMBEDDING_DIM:-384}
       PRELOAD_MODELS: ${PRELOAD_MODELS:-true}
       WHISPER_CONCURRENCY: ${WHISPER_CONCURRENCY:-1}
@@ -36,6 +40,9 @@ services:
       TRANSCRIBE_WINDOW_SEC: ${TRANSCRIBE_WINDOW_SEC:-1800}
       OPENAI_WINDOW_SEC: ${OPENAI_WINDOW_SEC:-1200}
       MEDIA_ROOT: /data/media
+      RERANK_MODEL: ${RERANK_MODEL-cross-encoder/mmarco-mMiniLMv2-L12-H384-v1}
+      # Hugging Face's Xet CDN failed mid-download here; plain HTTP downloads are reliable.
+      HF_HUB_DISABLE_XET: "1"
     ports:
       - "${TRANSCRIPTION_PORT:-8000}:8000"
     volumes:
@@ -67,13 +74,15 @@ services:
       MEDIA_STORAGE_DIR: /data/media
       MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-5GB}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:4200}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
       EMBEDDING_DIM: ${EMBEDDING_DIM:-384}
       EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-32}
       CHUNK_WINDOW_SEC: ${CHUNK_WINDOW_SEC:-30}
       CHUNK_OVERLAP_SEC: ${CHUNK_OVERLAP_SEC:-5}
       PROCESSING_WORKER_THREADS: ${PROCESSING_WORKER_THREADS:-2}
       SEARCH_DEFAULT_LIMIT: ${SEARCH_DEFAULT_LIMIT:-10}
+      SEARCH_CANDIDATES: ${SEARCH_CANDIDATES:-30}
+      SEARCH_RERANK: ${SEARCH_RERANK:-true}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:

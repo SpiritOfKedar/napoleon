@@ -1,21 +1,221 @@
-@use '@angular/material' as mat;
+// Napoleon design foundation.
+// Neutral, system-native, light and dark. One accent (system blue), used only for things you can
+// act on. Hierarchy comes from type weight, size and spacing, not from colour or decoration.
 
-html {
+:root {
   color-scheme: light dark;
-  @include mat.theme((
-    color: mat.$azure-palette,
-    typography: Roboto,
-    density: 0,
-  ));
+
+  --bg: #ffffff;
+  --bg-grouped: #f5f5f7;
+  --surface: #ffffff;
+  --label: #1d1d1f;
+  --label-2: rgba(60, 60, 67, 0.62);
+  --label-3: rgba(60, 60, 67, 0.32);
+  --separator: rgba(60, 60, 67, 0.16);
+  --fill: rgba(118, 118, 128, 0.1);
+  --fill-2: rgba(118, 118, 128, 0.18);
+  --accent: #0071e3;
+  --accent-tint: rgba(0, 113, 227, 0.12);
+  --green: #248a3d;
+  --orange: #c45500;
+  --red: #d70015;
+  --material: rgba(255, 255, 255, 0.72);
+  --material-heavy: rgba(246, 246, 248, 0.8);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
+
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  --mono: 'SF Mono', ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+
+  // Critically damped feel for the few CSS transitions (state changes, not gestures).
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --radius: 12px;
 }
 
-html, body { height: 100%; }
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e0e10;
+    --bg-grouped: #0e0e10;
+    --surface: #1c1c1e;
+    --label: #f5f5f7;
+    --label-2: rgba(235, 235, 245, 0.6);
+    --label-3: rgba(235, 235, 245, 0.3);
+    --separator: rgba(255, 255, 255, 0.1);
+    --fill: rgba(118, 118, 128, 0.2);
+    --fill-2: rgba(118, 118, 128, 0.3);
+    --accent: #0a84ff;
+    --accent-tint: rgba(10, 132, 255, 0.18);
+    --green: #30d158;
+    --orange: #ff9f0a;
+    --red: #ff453a;
+    --material: rgba(14, 14, 16, 0.72);
+    --material-heavy: rgba(24, 24, 27, 0.78);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.3);
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { font: 100%/1.5 var(--font); -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
-  font-family: Roboto, "Helvetica Neue", sans-serif;
-  background: var(--mat-sys-surface);
-  color: var(--mat-sys-on-surface);
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--label);
+  -webkit-font-smoothing: antialiased;
+  font-optical-sizing: auto;
 }
-a { color: var(--mat-sys-primary); }
-h1 { font: var(--mat-sys-headline-small); margin: 8px 0 16px; }
-h2 { font: var(--mat-sys-title-large); margin: 24px 0 8px; }
+
+// Type scale. Tracking tightens as size grows; body stays near 0.
+.large-title { font-family: var(--font-display); font-size: 1.75rem; line-height: 1.12; font-weight: 700; letter-spacing: -0.022em; margin: 0; }
+.title-2 { font-family: var(--font-display); font-size: 1.25rem; line-height: 1.2; font-weight: 600; letter-spacing: -0.016em; margin: 0; }
+.headline { font-size: 0.9375rem; line-height: 1.35; font-weight: 600; letter-spacing: -0.008em; }
+.subhead { font-size: 0.875rem; line-height: 1.4; color: var(--label-2); }
+.footnote { font-size: 0.8125rem; line-height: 1.38; color: var(--label-2); }
+.caption { font-size: 0.75rem; line-height: 1.33; color: var(--label-2); letter-spacing: 0.01em; }
+.tnum { font-variant-numeric: tabular-nums; }
+.secondary { color: var(--label-2); }
+.danger-text { color: var(--red); }
+
+a { color: var(--accent); text-decoration: none; }
+::selection { background: var(--accent-tint); }
+
+:focus { outline: none; }
+:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 6px; }
+
+// Page chrome: a translucent toolbar that content scrolls under, with a soft scroll edge instead
+// of a hard divider.
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 3.5rem;
+  padding: 0.625rem 2rem;
+  background: var(--material);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+.toolbar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 0.75rem;
+  pointer-events: none;
+  background: linear-gradient(var(--material), transparent);
+}
+.page { padding: 0.5rem 2rem 4rem; max-width: 64rem; }
+
+// Buttons. Feedback on press (pointer-down), immediately.
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  height: 2rem;
+  padding: 0 0.875rem;
+  border: 0;
+  border-radius: 980px;
+  background: var(--fill);
+  color: var(--label);
+  font: 500 0.875rem/1 var(--font);
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 100ms ease-out, background-color 150ms ease-out, color 150ms ease-out;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:hover { background: var(--fill-2); }
+.btn:active { transform: scale(0.97); }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, #000); }
+.btn.plain { background: transparent; color: var(--accent); padding: 0 0.5rem; }
+.btn.plain:hover { background: var(--accent-tint); }
+.btn.icon { width: 2rem; padding: 0; background: transparent; color: var(--label-2); }
+.btn.icon:hover { background: var(--fill); color: var(--label); }
+.btn.icon.destructive:hover { color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
+.btn:disabled, .btn.disabled, .btn[aria-disabled='true'] { opacity: 0.35; pointer-events: none; }
+
+// Search field: a quiet filled well.
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2.25rem;
+  padding: 0 0.75rem;
+  border-radius: 10px;
+  background: var(--fill);
+  color: var(--label-2);
+  transition: box-shadow 150ms ease-out;
+}
+.search-field:focus-within { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent); }
+.search-field input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--label);
+  font: 400 0.9375rem var(--font);
+  letter-spacing: -0.008em;
+}
+.search-field input::placeholder { color: var(--label-3); }
+.search-field input:focus-visible { box-shadow: none; }
+
+// Inset grouped list: the one container style used everywhere.
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--separator);
+  overflow: hidden;
+}
+@media (prefers-color-scheme: dark) { .list { box-shadow: none; } }
+.list > li + li { position: relative; }
+.list > li + li::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: var(--inset, 1rem);
+  border-top: 1px solid var(--separator);
+}
+
+// Highlighted query words: weight first, a faint tint second.
+mark {
+  color: inherit;
+  font-weight: 600;
+  background: var(--accent-tint);
+  border-radius: 3px;
+  padding: 0 0.125rem;
+  margin: 0 -0.125rem;
+}
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 760px) {
+  .toolbar { padding: 0.625rem 1rem; }
+  .page { padding: 0.5rem 1rem 3rem; }
+}
+
+// Accessibility signals.
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-property: opacity, color, background-color !important; animation: none !important; }
+  .btn:active { transform: none; }
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root { --material: var(--bg); --material-heavy: var(--bg-grouped); }
+  .toolbar { backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+@media (prefers-contrast: more) {
+  :root { --separator: rgba(60, 60, 67, 0.45); --label-2: rgba(60, 60, 67, 0.85); --fill: rgba(118, 118, 128, 0.22); }
+  .list { box-shadow: inset 0 0 0 1px var(--separator); }
+}

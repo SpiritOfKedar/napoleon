@@ -164,7 +164,7 @@ class StreamingPipelineIntegrationTest {
         assertThat(after.getErrorMessage()).contains("broke off");
         // Two full batches of 32 were committed before the break; the partial third was not.
         assertThat(segments(m)).hasSize(64);
-        assertThat(after.getProgressPct()).isEqualTo(6.4);
+        assertThat(after.getProgressPct()).isCloseTo(6.4, org.assertj.core.data.Offset.offset(1e-4)); // REAL column
         assertThat(chunkRepo.countByMediaFileId(m.getId())).isZero();
     }
 

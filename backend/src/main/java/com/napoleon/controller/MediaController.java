@@ -53,6 +53,11 @@ public class MediaController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/{id}/reprocess")
+    public ResponseEntity<MediaFileDto> reprocess(@PathVariable long id) {
+        return ResponseEntity.accepted().body(mediaService.reprocess(id));
+    }
+
     @GetMapping("/{id}/transcript")
     public List<TranscriptSegmentDto> transcript(@PathVariable long id) {
         return mediaService.transcript(id);

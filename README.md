@@ -142,14 +142,35 @@ The ones you are most likely to change:
 
 | Variable | Default | |
 |---|---|---|
-| `WHISPER_BACKEND` | `local` | `local` (faster-whisper) or `openai` (OpenAI API; set `OPENAI_API_KEY`; 25 MB per-file API limit) |
+| `WHISPER_BACKEND` | `local` | `local` (faster-whisper) or `openai` (OpenAI API; set `OPENAI_API_KEY`; audio is sent as 32 kbit/s MP3 in 20-minute pieces to stay under its 25 MB limit) |
 | `WHISPER_MODEL_SIZE` | `base` | `tiny`, `base`, `small`, `medium`, `large-v3` |
 | `WHISPER_LANGUAGE` | *(auto)* | e.g. `en` to skip language detection |
 | `EMBEDDING_MODEL` / `EMBEDDING_DIM` | `all-MiniLM-L6-v2` / `384` | must match each other; see the warning below |
 | `CHUNK_WINDOW_SEC` / `CHUNK_OVERLAP_SEC` | `30` / `5` | applies to newly processed files |
-| `MAX_UPLOAD_SIZE` | `500MB` | Spring size syntax |
+| `MAX_UPLOAD_SIZE` | `5GB` | Spring size syntax |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | only needed when the UI and API are on different origins |
-| `PROCESSING_WORKER_THREADS` | `2` | files transcribed in parallel |
+| `PROCESSING_WORKER_THREADS` | `2` | files processed in parallel by the backend |
+| `WHISPER_CONCURRENCY` | `1` | files Whisper transcribes at once; others wait their turn |
+| `TRANSCRIBE_WINDOW_SEC` | `1800` | recordings are transcribed in windows this long, so memory stays flat |
+
+## Long recordings
+
+Napoleon is built to handle multi-hour, multi-GB videos:
+
+- **No re-upload.** In Docker Compose the transcription service mounts the media volume read-only
+  (`TRANSCRIPTION_SHARED_STORAGE=true`), so ffmpeg reads the stored file in place. Only the
+  backend receives the upload, and Tomcat's temp file is renamed into place, not copied.
+- **Windowed transcription.** Audio is cut into `TRANSCRIBE_WINDOW_SEC` windows and transcribed one
+  at a time, so RAM and temp disk do not grow with the length of the recording. A sentence cut by a
+  window boundary is redone at the start of the next window.
+- **Streaming and progress.** Segments stream back as NDJSON (`POST /transcribe/stream`) and are
+  embedded and stored in batches as they arrive. The Library shows *Transcribing… 42%*.
+- **Resume.** If the backend restarts mid-way, the file continues after its last stored segment
+  instead of starting over.
+
+Without a shared volume (for example, the backend running outside Docker), the backend falls back to
+uploading the file to `POST /transcribe` and waits for the whole transcript; there is no progress
+or resume in that mode.
 
 > **Embedding dimension is locked in at first start.** The Flyway migration creates
 > `vector(${EMBEDDING_DIM})` columns the first time the database starts. To switch to a model with

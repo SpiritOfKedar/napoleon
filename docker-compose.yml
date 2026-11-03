@@ -31,11 +31,18 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
       EMBEDDING_DIM: ${EMBEDDING_DIM:-384}
       PRELOAD_MODELS: ${PRELOAD_MODELS:-true}
+      WHISPER_CONCURRENCY: ${WHISPER_CONCURRENCY:-1}
+      WHISPER_CPU_THREADS: ${WHISPER_CPU_THREADS:-0}
+      TRANSCRIBE_WINDOW_SEC: ${TRANSCRIBE_WINDOW_SEC:-1800}
+      OPENAI_WINDOW_SEC: ${OPENAI_WINDOW_SEC:-1200}
+      MEDIA_ROOT: /data/media
     ports:
       - "${TRANSCRIPTION_PORT:-8000}:8000"
     volumes:
       # Downloaded Whisper and sentence-transformers weights survive rebuilds.
       - model-cache:/models
+      # Uploaded media, read-only: files are transcribed in place instead of re-uploaded over HTTP.
+      - media-data:/data/media:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 10s
@@ -52,8 +59,13 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:-napoleon}
       TRANSCRIPTION_SERVICE_URL: http://transcription-service:8000
       TRANSCRIPTION_READ_TIMEOUT: ${TRANSCRIPTION_READ_TIMEOUT:-60m}
+      # The transcription service mounts media-data too (see above).
+      TRANSCRIPTION_SHARED_STORAGE: "true"
+      TRANSCRIPTION_STREAM_IDLE_TIMEOUT: ${TRANSCRIPTION_STREAM_IDLE_TIMEOUT:-5m}
+      # Multipart temp files on the media volume, so storing an upload is a rename, not a copy.
+      SPRING_SERVLET_MULTIPART_LOCATION: /data/media/.incoming
       MEDIA_STORAGE_DIR: /data/media
-      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-500MB}
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-5GB}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:4200}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
       EMBEDDING_DIM: ${EMBEDDING_DIM:-384}

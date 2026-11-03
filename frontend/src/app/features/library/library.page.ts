@@ -41,7 +41,7 @@ import { StatusBadge } from '../../shared/status-badge';
               <span class="error small">{{ m.errorMessage }}</span>
             }
           </div>
-          <app-status-badge [status]="m.status" />
+          <app-status-badge [status]="m.status" [progress]="m.progressPct" />
           <div class="actions">
             <a mat-button [routerLink]="['/player', m.id]" [disabled]="m.status !== 'INDEXED'">
               <mat-icon>play_arrow</mat-icon>Play

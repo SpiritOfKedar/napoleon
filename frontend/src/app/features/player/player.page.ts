@@ -22,7 +22,7 @@ import { StatusBadge } from '../../shared/status-badge';
     @if (media(); as m) {
       <div class="title">
         <h1>{{ m.filename }}</h1>
-        <app-status-badge [status]="m.status" />
+        <app-status-badge [status]="m.status" [progress]="m.progressPct" />
       </div>
 
       <!-- One <video> element plays audio files too; it just collapses to the controls bar. -->

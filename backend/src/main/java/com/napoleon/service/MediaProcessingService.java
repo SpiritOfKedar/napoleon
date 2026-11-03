@@ -13,12 +13,22 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-/** The upload pipeline: transcribe, chunk, embed, persist. Runs on the media executor. */
+/**
+ * The upload pipeline: transcribe, embed and store segments as they arrive, then chunk, embed and
+ * store chunks. Runs on the media executor.
+ *
+ * <p>With shared storage the transcription service reads the file from the shared volume and
+ * streams segments back, so a long recording is indexed incrementally, shows progress, and resumes
+ * from the last stored segment if the backend restarts mid-way. Without it, the file is uploaded
+ * and the whole transcript comes back in one response.
+ */
 @Service
 public class MediaProcessingService {
 
     private static final Logger log = LoggerFactory.getLogger(MediaProcessingService.class);
     private static final int MAX_ERROR_LENGTH = 2000;
+    /** Progress stays below this until chunks are written and the file is really INDEXED. */
+    private static final double MAX_STREAMING_PROGRESS = 99.0;
 
     private final MediaFileRepository mediaRepo;
     private final MediaStorage storage;
@@ -26,6 +36,7 @@ public class MediaProcessingService {
     private final TranscriptIndexer indexer;
     private final Chunker chunker;
     private final int embedBatchSize;
+    private final boolean sharedStorage;
 
     public MediaProcessingService(MediaFileRepository mediaRepo, MediaStorage storage,
                                   TranscriptionClient client, TranscriptIndexer indexer,
@@ -36,6 +47,7 @@ public class MediaProcessingService {
         this.indexer = indexer;
         this.chunker = new Chunker(props.chunking().windowSec(), props.chunking().overlapSec());
         this.embedBatchSize = props.embedding().batchSize();
+        this.sharedStorage = props.transcription().sharedStorage();
     }
 
     @Async(AsyncConfig.MEDIA_EXECUTOR)
@@ -51,43 +63,119 @@ public class MediaProcessingService {
             return;
         }
         try {
+            // TRANSCRIBING at this point means a previous run was cut off (ProcessingRecovery).
+            boolean interrupted = media.getStatus() == MediaStatus.TRANSCRIBING;
             media.setStatus(MediaStatus.TRANSCRIBING);
             media = mediaRepo.save(media);
 
             long t0 = System.currentTimeMillis();
-            TranscriptionClient.TranscriptionResult result =
-                    client.transcribe(storage.resolve(media.getStoragePath()), media.getFilename());
+            SegmentSink sink;
+            if (sharedStorage) {
+                double offset = 0;
+                int nextSeq = 0;
+                if (interrupted) {
+                    TranscriptIndexer.ResumePoint from = indexer.resumePoint(mediaId);
+                    offset = from.endSec();
+                    nextSeq = from.nextSeq();
+                    if (nextSeq > 0) {
+                        log.info("Resuming media {} ({}) at {}s; keeping {} stored segments",
+                                mediaId, media.getFilename(), offset, nextSeq);
+                    }
+                } else {
+                    indexer.reset(mediaId);
+                }
+                sink = new SegmentSink(mediaId, nextSeq, media.getDurationSec());
+                client.transcribeStream(storage.relativePath(media.getStoragePath()), offset, sink);
+                sink.flush();
+            } else {
+                indexer.reset(mediaId);
+                TranscriptionClient.TranscriptionResult result =
+                        client.transcribe(storage.resolve(media.getStoragePath()), media.getFilename());
+                sink = new SegmentSink(mediaId, 0, null);
+                sink.onMeta(result.durationSec());
+                result.segments().forEach(sink::onSegment);
+                sink.flush();
+            }
 
-            List<Chunker.Segment> segments = result.segments().stream()
-                    .filter(s -> s.text() != null && !s.text().isBlank())
-                    .map(s -> new Chunker.Segment(s.startSec(), s.endSec(), s.text().strip()))
-                    .toList();
+            List<Chunker.Segment> segments = indexer.loadSegments(mediaId);
             if (segments.isEmpty()) {
                 throw new IllegalStateException("No speech was detected in this file");
             }
 
+            // Chunks are what search ranks; segments were embedded too (while streaming) so search
+            // can point at the exact sentence inside a 30 s chunk instead of the chunk's start.
             List<Chunker.Chunk> chunks = chunker.chunk(segments);
-
-            // Chunks are what search ranks; segments are embedded too so search can point at the
-            // exact sentence inside a 30 s chunk instead of the chunk's start.
             List<float[]> chunkVectors = embedInBatches(chunks.stream().map(Chunker.Chunk::text).toList());
-            List<float[]> segmentVectors = embedInBatches(segments.stream().map(Chunker.Segment::text).toList());
-
             List<TranscriptIndexer.EmbeddedChunk> embeddedChunks = new ArrayList<>(chunks.size());
             for (int i = 0; i < chunks.size(); i++) {
                 embeddedChunks.add(new TranscriptIndexer.EmbeddedChunk(chunks.get(i), chunkVectors.get(i)));
             }
-            List<TranscriptIndexer.EmbeddedSegment> embeddedSegments = new ArrayList<>(segments.size());
-            for (int i = 0; i < segments.size(); i++) {
-                embeddedSegments.add(new TranscriptIndexer.EmbeddedSegment(segments.get(i), segmentVectors.get(i)));
-            }
-            indexer.replaceIndex(mediaId, result.durationSec(), embeddedSegments, embeddedChunks);
+            indexer.finalizeIndex(mediaId, sink.durationSec, embeddedChunks);
 
             log.info("Indexed media {} ({}): {} segments, {} chunks in {} ms", mediaId, media.getFilename(),
                     segments.size(), chunks.size(), System.currentTimeMillis() - t0);
         } catch (Exception e) {
             log.error("Processing media {} failed", mediaId, e);
             markFailed(mediaId, e);
+        }
+    }
+
+    /**
+     * Collects streamed segments and stores them every {@code embedBatchSize} segments, so memory
+     * stays flat and an interruption loses at most one batch.
+     */
+    private final class SegmentSink implements TranscriptionClient.StreamListener {
+
+        private final long mediaId;
+        private final List<Chunker.Segment> buffer = new ArrayList<>();
+        private int nextSeq;
+        private Double durationSec;
+
+        SegmentSink(long mediaId, int nextSeq, Double knownDurationSec) {
+            this.mediaId = mediaId;
+            this.nextSeq = nextSeq;
+            this.durationSec = knownDurationSec;
+        }
+
+        @Override
+        public void onMeta(Double duration) {
+            if (duration != null) {
+                durationSec = duration;
+                indexer.recordDuration(mediaId, duration);
+            }
+        }
+
+        @Override
+        public void onSegment(TranscriptionClient.Segment s) {
+            if (s.text() == null || s.text().isBlank()) {
+                return;
+            }
+            buffer.add(new Chunker.Segment(s.startSec(), s.endSec(), s.text().strip()));
+            if (buffer.size() >= embedBatchSize) {
+                flush();
+            }
+        }
+
+        void flush() {
+            if (buffer.isEmpty()) {
+                return;
+            }
+            List<float[]> vectors = embedInBatches(buffer.stream().map(Chunker.Segment::text).toList());
+            List<TranscriptIndexer.EmbeddedSegment> batch = new ArrayList<>(buffer.size());
+            for (int i = 0; i < buffer.size(); i++) {
+                batch.add(new TranscriptIndexer.EmbeddedSegment(buffer.get(i), vectors.get(i)));
+            }
+            indexer.appendSegments(mediaId, nextSeq, batch, progressAt(buffer.getLast().endSec()));
+            nextSeq += buffer.size();
+            buffer.clear();
+        }
+
+        private Double progressAt(double endSec) {
+            if (durationSec == null || durationSec <= 0) {
+                return null;
+            }
+            double pct = Math.min(MAX_STREAMING_PROGRESS, 100.0 * endSec / durationSec);
+            return Math.round(pct * 10) / 10.0;
         }
     }
 

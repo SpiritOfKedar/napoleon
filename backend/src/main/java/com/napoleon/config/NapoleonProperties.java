@@ -21,7 +21,14 @@ public record NapoleonProperties(
         @Valid @NotNull Processing processing,
         @Valid @NotNull Search search) {
 
-    public record Transcription(@NotBlank String baseUrl, @NotNull Duration connectTimeout, @NotNull Duration readTimeout) {}
+    /**
+     * @param readTimeout       for the upload-based /transcribe call, which answers only when done
+     * @param sharedStorage     the transcription service mounts the media dir, so files are passed
+     *                          by path and transcribed through the streaming, resumable endpoint
+     * @param streamIdleTimeout longest silence on the stream; the service sends heartbeats
+     */
+    public record Transcription(@NotBlank String baseUrl, @NotNull Duration connectTimeout, @NotNull Duration readTimeout,
+                                boolean sharedStorage, @NotNull Duration streamIdleTimeout) {}
 
     public record Embedding(@NotBlank String model, @Positive int dim, @Positive int batchSize) {}
 

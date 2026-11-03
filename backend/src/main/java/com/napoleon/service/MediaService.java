@@ -6,7 +6,6 @@ import com.napoleon.dto.TranscriptSegmentDto;
 import com.napoleon.repository.MediaFileRepository;
 import com.napoleon.repository.TranscriptSegmentRepository;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -53,10 +52,7 @@ public class MediaService {
             throw new BadRequestException("Unsupported file type '" + ext + "'. Allowed: " + ALLOWED_EXTENSIONS);
         }
 
-        Path stored;
-        try (InputStream in = file.getInputStream()) {
-            stored = storage.store(in, filename);
-        }
+        Path stored = storage.store(file, filename);
         String contentType = MediaTypeFactory.getMediaType(filename)
                 .map(MediaType::toString)
                 .orElse(file.getContentType());

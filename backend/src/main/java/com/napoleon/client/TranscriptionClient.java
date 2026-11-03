@@ -1,8 +1,16 @@
 package com.napoleon.client;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.napoleon.config.NapoleonProperties;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.MediaType;
@@ -26,24 +34,58 @@ public class TranscriptionClient {
                                       @JsonProperty("duration_sec") Double durationSec,
                                       String language) {}
 
+    /** Receives a streamed transcription as it happens. An exception thrown here aborts the stream. */
+    public interface StreamListener {
+        /** First event: the length of the whole file, or null if ffprobe could not tell. */
+        void onMeta(Double durationSec);
+
+        /** Timestamps are relative to the start of the file, also when resuming from an offset. */
+        void onSegment(Segment segment);
+    }
+
     record EmbedRequest(List<String> texts) {}
 
     record EmbedResponse(String model, int dim, List<float[]> vectors) {}
 
+    record StreamRequest(String path, @JsonProperty("start_offset_sec") double startOffsetSec) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record StreamLine(String type,
+                      @JsonProperty("duration_sec") Double durationSec,
+                      @JsonProperty("start_sec") Double startSec,
+                      @JsonProperty("end_sec") Double endSec,
+                      String text,
+                      String language,
+                      String detail) {}
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     private final RestClient restClient;
+    private final RestClient streamClient;
     private final int expectedDim;
 
     public TranscriptionClient(RestClient.Builder builder, NapoleonProperties props) {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(props.transcription().connectTimeout());
-        factory.setReadTimeout(props.transcription().readTimeout());
-        this.restClient = builder
-                .baseUrl(props.transcription().baseUrl())
-                .requestFactory(factory)
+        NapoleonProperties.Transcription cfg = props.transcription();
+        this.restClient = builder.clone()
+                .baseUrl(cfg.baseUrl())
+                .requestFactory(requestFactory(cfg.connectTimeout(), cfg.readTimeout()))
+                .build();
+        // For the stream the read timeout is the longest allowed gap between two lines.
+        this.streamClient = builder.clone()
+                .baseUrl(cfg.baseUrl())
+                .requestFactory(requestFactory(cfg.connectTimeout(), cfg.streamIdleTimeout()))
                 .build();
         this.expectedDim = props.embedding().dim();
     }
 
+    private static SimpleClientHttpRequestFactory requestFactory(Duration connectTimeout, Duration readTimeout) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(connectTimeout);
+        factory.setReadTimeout(readTimeout);
+        return factory;
+    }
+
+    /** Upload-based transcription: sends the whole file and waits for the whole transcript. */
     public TranscriptionResult transcribe(Path file, String originalFilename) {
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
         body.add("file", new FileSystemResource(file) {
@@ -68,6 +110,63 @@ public class TranscriptionClient {
         } catch (RestClientException e) {
             throw new TranscriptionClientException("Transcription service unreachable: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Streaming transcription of a file on the shared media volume. Blocks until the service reports
+     * done, calling the listener for each event, and returns the detected language.
+     *
+     * @param relativePath   path relative to the shared media root
+     * @param startOffsetSec where to start (for resuming); 0 for the whole file
+     */
+    public String transcribeStream(String relativePath, double startOffsetSec, StreamListener listener) {
+        try {
+            return streamClient.post()
+                    .uri("/transcribe/stream")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(new StreamRequest(relativePath, startOffsetSec))
+                    .exchange((request, response) -> {
+                        if (response.getStatusCode().isError()) {
+                            String detail = new String(response.getBody().readAllBytes(), StandardCharsets.UTF_8);
+                            throw new TranscriptionClientException("Transcription failed: "
+                                    + response.getStatusCode().value() + " " + truncate(detail));
+                        }
+                        return readStream(response.getBody(), listener);
+                    });
+        } catch (RestClientException e) {
+            throw new TranscriptionClientException("Transcription stream broke off: " + e.getMessage(), e);
+        }
+    }
+
+    /** Parses the NDJSON stream of /transcribe/stream. Package-private for tests. */
+    static String readStream(InputStream body, StreamListener listener) throws IOException {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isBlank()) {
+                    continue;
+                }
+                StreamLine event = MAPPER.readValue(line, StreamLine.class);
+                switch (event.type() == null ? "" : event.type()) {
+                    case "meta" -> listener.onMeta(event.durationSec());
+                    case "segment" -> {
+                        if (event.startSec() == null || event.endSec() == null) {
+                            throw new TranscriptionClientException(
+                                    "Malformed segment in transcription stream: " + truncate(line));
+                        }
+                        listener.onSegment(new Segment(event.startSec(), event.endSec(), event.text()));
+                    }
+                    case "done" -> {
+                        return event.language();
+                    }
+                    case "error" -> throw new TranscriptionClientException("Transcription failed: " + event.detail());
+                    default -> {
+                        // heartbeat, or an event type this version does not know: ignore
+                    }
+                }
+            }
+        }
+        throw new TranscriptionClientException("Transcription stream ended before it was complete");
     }
 
     public List<float[]> embed(List<String> texts) {
@@ -102,6 +201,10 @@ public class TranscriptionClient {
     private static String extractDetail(RestClientResponseException e) {
         String body = e.getResponseBodyAsString();
         String detail = body.isBlank() ? e.getStatusText() : body;
-        return e.getStatusCode().value() + " " + (detail.length() > 500 ? detail.substring(0, 500) : detail);
+        return e.getStatusCode().value() + " " + truncate(detail);
+    }
+
+    private static String truncate(String s) {
+        return s.length() > 500 ? s.substring(0, 500) : s;
     }
 }

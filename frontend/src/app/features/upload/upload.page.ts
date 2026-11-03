@@ -56,7 +56,7 @@ const ACCEPT = 'audio/*,video/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.flac,.webm,.mp4,
                 @case ('error') { <span class="error">{{ item.error }}</span> }
                 @case ('uploaded') {
                   @if (item.media; as m) {
-                    <app-status-badge [status]="m.status" />
+                    <app-status-badge [status]="m.status" [progress]="m.progressPct" />
                     @if (m.status === 'INDEXED') {
                       <a mat-button [routerLink]="['/player', m.id]">Open</a>
                     }

@@ -11,12 +11,15 @@ public record MediaFileDto(
         Long sizeBytes,
         Double durationSec,
         MediaStatus status,
+        /* 0..100 while TRANSCRIBING, null before transcription starts. */
+        Double progressPct,
         String errorMessage,
         Instant createdAt,
         Instant updatedAt) {
 
     public static MediaFileDto from(MediaFile m) {
         return new MediaFileDto(m.getId(), m.getFilename(), m.getContentType(), m.getSizeBytes(),
-                m.getDurationSec(), m.getStatus(), m.getErrorMessage(), m.getCreatedAt(), m.getUpdatedAt());
+                m.getDurationSec(), m.getStatus(), m.getProgressPct(), m.getErrorMessage(),
+                m.getCreatedAt(), m.getUpdatedAt());
     }
 }

@@ -9,6 +9,8 @@ export interface MediaFile {
   sizeBytes: number | null;
   durationSec: number | null;
   status: MediaStatus;
+  /** 0..100 while TRANSCRIBING; null before transcription starts. */
+  progressPct: number | null;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;

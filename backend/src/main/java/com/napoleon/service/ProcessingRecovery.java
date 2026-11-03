@@ -12,7 +12,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * The in-memory job queue is lost on restart, so files left UPLOADED or TRANSCRIBING by a previous
- * run are re-queued on startup. Indexing replaces rows, so re-running is safe.
+ * run are re-queued on startup. With shared storage a TRANSCRIBING file resumes after its last
+ * stored segment instead of starting over; otherwise indexing replaces rows, so re-running is safe.
  */
 @Component
 public class ProcessingRecovery {

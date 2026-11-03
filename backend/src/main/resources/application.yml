@@ -8,6 +8,10 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/napoleon}
     username: ${DB_USER:napoleon}
     password: ${DB_PASSWORD:napoleon}
+    hikari:
+      data-source-properties:
+        # Lets the driver send JDBC batches as multi-row INSERTs (transcripts are bulk-inserted).
+        reWriteBatchedInserts: true
   jpa:
     open-in-view: false
     hibernate:
@@ -20,8 +24,8 @@ spring:
       embedding_dim: ${EMBEDDING_DIM:384}
   servlet:
     multipart:
-      max-file-size: ${MAX_UPLOAD_SIZE:500MB}
-      max-request-size: ${MAX_UPLOAD_SIZE:500MB}
+      max-file-size: ${MAX_UPLOAD_SIZE:5GB}
+      max-request-size: ${MAX_UPLOAD_SIZE:5GB}
       # Stream large uploads to disk instead of buffering them in memory.
       file-size-threshold: 1MB
 
@@ -31,8 +35,14 @@ napoleon:
   transcription:
     base-url: ${TRANSCRIPTION_SERVICE_URL:http://localhost:8000}
     connect-timeout: ${TRANSCRIPTION_CONNECT_TIMEOUT:10s}
-    # Transcribing an hour of audio on CPU can take a while.
+    # Only for the upload-based fallback, which answers once the whole file is done.
     read-timeout: ${TRANSCRIPTION_READ_TIMEOUT:60m}
+    # true when the transcription service mounts MEDIA_STORAGE_DIR (docker-compose does): files are
+    # passed by path instead of uploaded, segments stream back with progress, and an interrupted
+    # file resumes where it stopped.
+    shared-storage: ${TRANSCRIPTION_SHARED_STORAGE:false}
+    # The stream carries a heartbeat every ~15 s, so this only fires if the service is gone.
+    stream-idle-timeout: ${TRANSCRIPTION_STREAM_IDLE_TIMEOUT:5m}
   embedding:
     model: ${EMBEDDING_MODEL:sentence-transformers/all-MiniLM-L6-v2}
     dim: ${EMBEDDING_DIM:384}

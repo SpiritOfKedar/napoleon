@@ -1,8 +1,10 @@
 """API tests with the heavy models stubbed out. Run: PRELOAD_MODELS=false pytest"""
 import os
+import shutil
 
 os.environ["PRELOAD_MODELS"] = "false"
 
+import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import main  # noqa: E402
@@ -31,6 +33,7 @@ def test_embed_rejects_empty_list():
         assert client.post("/embed", json={"texts": []}).status_code == 422
 
 
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg (runs in the service image)")
 def test_transcribe_rejects_non_media_file():
     with TestClient(main.app) as client:
         resp = client.post("/transcribe", files={"file": ("notes.mp3", b"definitely not audio", "audio/mpeg")})

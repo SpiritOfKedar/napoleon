@@ -39,6 +39,10 @@ public class MediaFile {
     @Column(nullable = false)
     private MediaStatus status;
 
+    /** 0..100 while transcribing; written directly by TranscriptIndexer as segments arrive. */
+    @Column(name = "progress_pct")
+    private Double progressPct;
+
     @Column(name = "error_message")
     private String errorMessage;
 
@@ -76,12 +80,14 @@ public class MediaFile {
     public Long getSizeBytes() { return sizeBytes; }
     public Double getDurationSec() { return durationSec; }
     public MediaStatus getStatus() { return status; }
+    public Double getProgressPct() { return progressPct; }
     public String getErrorMessage() { return errorMessage; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 
     public void setStoragePath(String storagePath) { this.storagePath = storagePath; }
     public void setDurationSec(Double durationSec) { this.durationSec = durationSec; }
+    public void setProgressPct(Double progressPct) { this.progressPct = progressPct; }
 
     public void setStatus(MediaStatus status) {
         this.status = status;

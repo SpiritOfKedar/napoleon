@@ -17,11 +17,16 @@ import { MediaStatus } from '../core/models';
 })
 export class StatusBadge {
   readonly status = input.required<MediaStatus>();
+  /** Transcription progress, 0..100; shown while TRANSCRIBING when known. */
+  readonly progress = input<number | null | undefined>(null);
   readonly cls = computed(() => this.status().toLowerCase());
   readonly label = computed(() => {
     switch (this.status()) {
       case 'UPLOADED': return 'Queued';
-      case 'TRANSCRIBING': return 'Transcribing…';
+      case 'TRANSCRIBING': {
+        const p = this.progress();
+        return p != null && p > 0 ? `Transcribing… ${Math.floor(p)}%` : 'Transcribing…';
+      }
       case 'INDEXED': return 'Indexed';
       case 'FAILED': return 'Failed';
     }

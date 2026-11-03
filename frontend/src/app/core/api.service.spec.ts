@@ -17,6 +17,7 @@ describe('ApiService', () => {
     sizeBytes: 100,
     durationSec: 900,
     status: 'INDEXED',
+    progressPct: 100,
     errorMessage: null,
     createdAt: '2026-11-03T10:00:00Z',
     updatedAt: '2026-11-03T10:05:00Z',
